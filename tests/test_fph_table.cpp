@@ -1,4 +1,5 @@
-
+#include "fph/dynamic_fph_table.h"
+#include "loghelper.h"
 
 #include <unordered_set>
 #include <unordered_map>
@@ -8,9 +9,6 @@
 #include <vector>
 #include <random>
 
-
-#include "fph/dynamic_fph_table.h"
-#include "loghelper.h"
 
 
 #define TEST_TABLE_CORRECT 1

@@ -67,9 +67,11 @@
 #include <stdexcept>
 #include <cmath>
 #include <limits>
+#include <tuple>
 #include <cassert>
 #include <iterator>
 #include <vector>
+#include <string>
 #include <random>
 #include <cstring>
 #include <deque>
@@ -96,41 +98,106 @@ namespace fph {
 #define FPH_DEBUG_ERROR 0
 #endif
 
+#ifdef __has_builtin
+#define FPH_HAVE_BUILTIN(x) __has_builtin(x)
+#else
+#define FPH_HAVE_BUILTIN(x) 0
+#endif
+
+#define FPH_HAVE_BUILTIN_OR_GCC_CLANG(x) (FPH_HAVE_BUILTIN(x) || (defined(__GNUC__) || defined(__clang__)))
+
 #ifndef FPH_LIKELY
-#define FPH_LIKELY(x) (__builtin_expect((x), 1))
+#   if FPH_HAVE_BUILTIN_OR_GCC_CLANG(__builtin_expect)
+#       define FPH_LIKELY(x) (__builtin_expect((x), 1))
+#   else
+#       define FPH_LIKELY(x) (x)
+#   endif
 #endif
 
 #ifndef FPH_UNLIKELY
-#define FPH_UNLIKELY(x) (__builtin_expect((x), 0))
+#   if FPH_HAVE_BUILTIN_OR_GCC_CLANG(__builtin_expect)
+#       define FPH_UNLIKELY(x) (__builtin_expect((x), 0))
+#   else
+#       define FPH_UNLIKELY(x) (x)
+#   endif
 #endif
 
 #ifndef FPH_ALWAYS_INLINE
-#define FPH_ALWAYS_INLINE inline __attribute__((__always_inline__))
+#   ifdef _MSC_VER
+#       define FPH_ALWAYS_INLINE __forceinline
+#   else
+#       define FPH_ALWAYS_INLINE inline __attribute__((__always_inline__))
+#   endif
 #endif
 
-#ifndef FPH_RESTRICT
-#define FPH_RESTRICT __restrict
+#ifdef _MSC_VER
+#   define FPH_RESTRICT
+#else
+#   define FPH_RESTRICT __restrict
 #endif
+
+#if defined(__GNUC__) && !defined(__clang__) && !defined(__INTEL_COMPILER)
+#   define FPH_FUNC_RESTRICT __restrict
+#else
+#   define FPH_FUNC_RESTRICT
+#endif
+
 
     namespace dynamic::detail {
         template <typename> inline constexpr bool always_false_v = false;
 
-        constexpr inline uint64_t RoundUp64Log2(uint64_t x) {
+#if FPH_HAVE_BUILTIN_OR_GCC_CLANG(__builtin_clz) && FPH_HAVE_BUILTIN_OR_GCC_CLANG(__builtin_clzll)
+#define FPH_INTERNAL_CONSTEXPR_CLZ constexpr
+#define FPH_INTERNAL_HAS_CONSTEXPR_CLZ 1
+#else
+#define FPH_INTERNAL_CONSTEXPR_CLZ
+#define FPH_INTERNAL_HAS_CONSTEXPR_CLZ 0
+#endif
+
+        FPH_INTERNAL_CONSTEXPR_CLZ inline int CountLeadingZero64(uint64_t x) {
+#if FPH_HAVE_BUILTIN_OR_GCC_CLANG(__builtin_clzll)
+            return __builtin_clzll(x);
+#elif defined(_MSC_VER)
+            unsigned long result = 0;  // NOLINT(runtime/int)
+            if ((x >> 32) &&
+                _BitScanReverse(&result, static_cast<unsigned long>(x >> 32))) {
+                return 31 - result;
+            }
+            if (_BitScanReverse(&result, static_cast<unsigned long>(x))) {
+                return 63 - result;
+            }
+            return 64;
+#endif
+        }
+
+        FPH_INTERNAL_CONSTEXPR_CLZ inline int CountLeadingZero32(uint32_t x) {
+#if FPH_HAVE_BUILTIN_OR_GCC_CLANG(__builtin_clz)
+            return __builtin_clz(x);
+#elif defined(_MSC_VER)
+            unsigned long result = 0;  // NOLINT(runtime/int)
+            if (_BitScanReverse(&result, x)) {
+                return 31 - result;
+            }
+            return 32;
+#endif
+        }
+
+        FPH_INTERNAL_CONSTEXPR_CLZ inline uint64_t RoundUp64Log2(uint64_t x) {
             if (x <= 1ULL) {
                 return x;
             }
-            return 64ULL - __builtin_clzll(x - 1ULL);
+            return 64ULL - CountLeadingZero64(x - 1ULL);
         }
 
-        constexpr inline uint32_t RoundUp32Log2(uint32_t x) {
+        FPH_INTERNAL_CONSTEXPR_CLZ inline uint32_t RoundUp32Log2(uint32_t x) {
             if (x <= 1U) {
                 return x;
             }
-            return 32U - __builtin_clz(x - 1U);
+            return 32U - CountLeadingZero32(x - 1U);
         }
 
         template<typename T>
-        constexpr T RoundUpLog2(T x) {
+        FPH_INTERNAL_CONSTEXPR_CLZ T RoundUpLog2(T x) {
             static_assert(std::is_unsigned<T>::value, "RoundUpLog2 type must be unsigned");
             if constexpr (sizeof(T) == 8) {
                 return RoundUp64Log2(x);
@@ -143,12 +210,14 @@ namespace fph {
             }
         }
 
+#if FPH_INTERNAL_HAS_CONSTEXPR_CLZ
         static_assert(RoundUpLog2(0U) == 0);
         static_assert(RoundUpLog2(1U) == 1U);
         static_assert(RoundUpLog2(15U) == 4U);
         static_assert(RoundUpLog2(16U) == 4U);
         static_assert(RoundUpLog2(31ULL) == 5ULL);
         static_assert(RoundUpLog2(32ULL) == 5ULL);
+#endif
 
         template<typename T>
         constexpr T GenBitMask(unsigned mask_len) {
@@ -170,16 +239,18 @@ namespace fph {
          * @return
          */
         template<typename T>
-        constexpr T Ceil2(T x) {
+        FPH_INTERNAL_CONSTEXPR_CLZ T Ceil2(T x) {
             static_assert(std::is_unsigned<T>::value, "Ceil2 type must be unsigned");
             auto roundup_log_2 = RoundUpLog2(x);
             return (T(1U)) << roundup_log_2;
         }
 
+#if FPH_INTERNAL_HAS_CONSTEXPR_CLZ
         static_assert(Ceil2(1U) == 2U);
         static_assert(Ceil2(0U) == 1U);
         static_assert(Ceil2(32U) == 32U);
         static_assert(Ceil2(33U) == 64U);
+#endif
 
         /**
          * Get the mask value in the format of (1ULL << num_bits) - 1 and no less than the x
@@ -188,7 +259,7 @@ namespace fph {
          * @return
          */
         template<typename T>
-        constexpr T CeilToMask(T x) {
+        FPH_INTERNAL_CONSTEXPR_CLZ T CeilToMask(T x) {
             static_assert(std::is_unsigned<T>::value, "x is not unsigned");
             auto roundup_log_2 = RoundUpLog2(x);
             return x == std::numeric_limits<T>::max() ? x :
@@ -196,11 +267,13 @@ namespace fph {
                      GenBitMask<T>(roundup_log_2));
         }
 
+#if FPH_INTERNAL_HAS_CONSTEXPR_CLZ
         static_assert(CeilToMask(0U) == 0U);
         static_assert(CeilToMask(5U) == 7U);
         static_assert(CeilToMask(8U) == 15U);
         static_assert(CeilToMask(15U) == 15U);
         static_assert(CeilToMask(0xffffffffU) == 0xffffffffU);
+#endif
 
         template <typename T, typename U>
         T RotateR (T v, U b)
@@ -342,24 +415,24 @@ namespace fph {
 
 
 
-        static constexpr uint64_t K_MUL =
-                sizeof(size_t) == 4 ? uint64_t{0xcc9e2d51}
-                                    : uint64_t{0x9ddfea08eb382d69};
-
-        FPH_ALWAYS_INLINE constexpr size_t Ano3SeedHash64(uint64_t key, size_t seed) {
-#if defined(__aarch64__)
-            // On AArch64, calculating a 128-bit product is inefficient, because it
-            // requires a sequence of two instructions to calculate the upper and lower
-            // halves of the result.
-            using MultType = uint64_t;
-#else
-            using MultType =
-            std::conditional<sizeof(size_t) == 4, uint64_t, __uint128_t>::type;
-#endif
-            MultType m = key + 0xff51afd7ed558ccdULL;
-            m *= seed;
-            return static_cast<size_t>(m ^ (m >> (sizeof(m) * 8 / 2)));
-        }
+//        static constexpr uint64_t K_MUL =
+//                sizeof(size_t) == 4 ? uint64_t{0xcc9e2d51}
+//                                    : uint64_t{0x9ddfea08eb382d69};
+//
+//        FPH_ALWAYS_INLINE constexpr size_t Ano3SeedHash64(uint64_t key, size_t seed) {
+//#if defined(__aarch64__)
+//            // On AArch64, calculating a 128-bit product is inefficient, because it
+//            // requires a sequence of two instructions to calculate the upper and lower
+//            // halves of the result.
+//            using MultType = uint64_t;
+//#else
+//            using MultType =
+//            std::conditional<sizeof(size_t) == 4, uint64_t, __uint128_t>::type;
+//#endif
+//            MultType m = key + 0xff51afd7ed558ccdULL;
+//            m *= seed;
+//            return static_cast<size_t>(m ^ (m >> (sizeof(m) * 8 / 2)));
+//        }
 
         FPH_ALWAYS_INLINE constexpr size_t Ano3SeedHash16(uint16_t key, size_t seed) {
 #if defined(__aarch64__)
@@ -399,7 +472,11 @@ namespace fph {
 
         template<class T>
         FPH_ALWAYS_INLINE T ReverseOrder64(T x) noexcept {
+#ifdef _MSC_VER
+            return _byteswap_uint64(x);
+#else
             return __builtin_bswap64(x);
+#endif
         }
 
         FPH_ALWAYS_INLINE size_t RevMulSeedHash64(uint64_t key, uint64_t seed) {
@@ -424,11 +501,11 @@ namespace fph {
             return ret;
         }
 
-        FPH_ALWAYS_INLINE uint64_t Mul2SeedHash64(uint64_t key, uint64_t seed) {
-            __uint128_t mul = key;
-            mul *= seed;
-            return uint64_t(mul) ^ uint64_t(mul >> 64U);
-        }
+//        FPH_ALWAYS_INLINE uint64_t Mul2SeedHash64(uint64_t key, uint64_t seed) {
+//            __uint128_t mul = key;
+//            mul *= seed;
+//            return uint64_t(mul) ^ uint64_t(mul >> 64U);
+//        }
 
         FPH_ALWAYS_INLINE uint64_t DualRotMulSeedHash64(uint64_t key, uint64_t seed) {
             uint64_t mul = key * seed;
@@ -519,7 +596,7 @@ namespace fph {
         template<class T>
         struct SimpleSeedHash<T*> {
             size_t operator()(T* x, size_t seed) const {
-                return dynamic::detail::ChosenSimpleSeedHash64(reinterpret_cast<uint64_t>(x), seed);
+                return dynamic::detail::ChosenSimpleSeedHash64(reinterpret_cast<size_t>(x), seed);
             }
         };
 
@@ -575,7 +652,7 @@ namespace fph {
         template<class T>
         struct MixSeedHash<T*> {
             size_t operator()(T* x, size_t seed) const {
-                return dynamic::detail::ChosenMixSeedHash64(reinterpret_cast<uint64_t>(x), seed);
+                return dynamic::detail::ChosenMixSeedHash64(reinterpret_cast<size_t>(x), seed);
             }
         };
 
@@ -631,7 +708,7 @@ namespace fph {
         template<class T>
         struct StrongSeedHash<T*> {
             size_t operator()(T* x, size_t seed) const {
-                return dynamic::detail::ChosenStrongSeedHash64(reinterpret_cast<uint64_t>(x), seed);
+                return dynamic::detail::ChosenStrongSeedHash64(reinterpret_cast<size_t>(x), seed);
             }
         };
 
@@ -921,7 +998,6 @@ namespace fph {
             if (first >= last) {
                 return;
             }
-            size_t array_num = std::distance(first, last);
             GetKey get_key{};
             using ValueType = decltype(get_key(*first));
             static_assert(std::is_integral<ValueType>::value, "Key type should be integer");
@@ -973,7 +1049,6 @@ namespace fph {
             if (first >= last) {
                 return;
             }
-            size_t array_num = std::distance(first, last);
             GetKey get_key{};
             using ValueType = decltype(get_key(*first));
             static_assert(std::is_integral<ValueType>::value, "Key type should be integer");
@@ -1182,9 +1257,6 @@ namespace fph {
             explicit DynamicRawSet(size_type bucket_count, const SeedHash& hash = SeedHash(),
                                    const key_equal& equal = key_equal(),
                                    const Allocator& alloc = Allocator()) :
-                    param_(nullptr),
-                    item_num_mask_(bucket_count - 1U),
-                    slot_(nullptr),
 #if FPH_DY_DUAL_BUCKET_SET
                     p1_(0), p2_(0), p2_plus_1_(0), p2_remain_(0),
                                 keys_first_part_ratio_(DEFAULT_KEYS_FIRST_PART_RATIO),
@@ -1192,9 +1264,11 @@ namespace fph {
 #else
                     bucket_mask_(0),
 #endif
-
+                    item_num_mask_(bucket_count - 1U),
                     seed1_(0), seed2_(0),
-                    bucket_p_array_{nullptr} {
+                    bucket_p_array_{nullptr},
+                    slot_(nullptr),
+                    param_(nullptr) {
 
                 TableParamAllocator  param_alloc{};
                 param_ = param_alloc.allocate(1);
@@ -1244,9 +1318,6 @@ namespace fph {
                     DynamicRawSet(first, last, hash, key_equal(), alloc) {}
 
             DynamicRawSet(const DynamicRawSet &other, const Allocator& alloc):
-                    slot_(nullptr),
-                    param_(nullptr),
-                    item_num_mask_(other.item_num_mask_),
 #if FPH_DY_DUAL_BUCKET_SET
                     p1_(other.p1_), p2(other.p2_), p2_plus_1_(other.p2_plus_1_), p2_remain_(other.p2_remain_),
                 keys_first_part_ratio_(other.keys_first_part_ratio_),
@@ -1254,9 +1325,12 @@ namespace fph {
 #else
                     bucket_mask_(other.bucket_mask_),
 #endif
+                    item_num_mask_(other.item_num_mask_),
                     seed1_(other.seed1_),
                     seed2_(other.seed2_),
-                    bucket_p_array_(nullptr)
+                    bucket_p_array_(nullptr),
+                    slot_(nullptr),
+                    param_(nullptr)
             {
                 if (other.param_ != nullptr) {
                     TableParamAllocator param_alloc{};
@@ -1772,7 +1846,7 @@ namespace fph {
              * @param key
              * @return
              */
-            size_t GetSlotPos(const key_type &key) const FPH_RESTRICT {
+            size_t GetSlotPos(const key_type &key) const FPH_FUNC_RESTRICT {
                 size_t bucket_index = GetBucketIndex(key);
                 size_t bucket_param = bucket_p_array_[bucket_index];
                 auto temp_offset = bucket_param >> 1U;
@@ -1781,7 +1855,7 @@ namespace fph {
                 return slot_pos;
             }
 
-            size_t GetSlotPos(const key_type &key, size_t offset, size_t optional_bit) const FPH_RESTRICT {
+            size_t GetSlotPos(const key_type &key, size_t offset, size_t optional_bit) const FPH_FUNC_RESTRICT {
                 auto slot_pos = (hash_(key, seed2_ + optional_bit) + offset) & item_num_mask_;
                 return slot_pos;
             }
@@ -2091,7 +2165,7 @@ namespace fph {
 
             }
 
-            size_t GetBucketIndex(const key_type &key) const FPH_RESTRICT {
+            size_t GetBucketIndex(const key_type &key) const FPH_FUNC_RESTRICT {
                 size_t temp_hash1 = hash_(key, seed1_);
 
 #if FPH_DY_DUAL_BUCKET_SET
@@ -2105,7 +2179,7 @@ namespace fph {
 
 
 
-            bool IsSlotEmpty(size_t pos) const FPH_RESTRICT {
+            bool IsSlotEmpty(size_t pos) const FPH_FUNC_RESTRICT {
                 if FPH_LIKELY(slot_ + pos != param_->default_fill_key_address_) {
                     return key_equal_(slot_[pos].key, *param_->default_fill_key_);
                 } else {
@@ -2113,7 +2187,7 @@ namespace fph {
                 }
             }
 
-            bool IsSlotEmpty(const slot_type* FPH_RESTRICT slot_ptr) const FPH_RESTRICT {
+            bool IsSlotEmpty(const slot_type* FPH_RESTRICT slot_ptr) const FPH_FUNC_RESTRICT {
                 if FPH_LIKELY(slot_ptr != param_->default_fill_key_address_) {
                     return key_equal_(slot_ptr->key, *param_->default_fill_key_);
                 } else {
@@ -2121,7 +2195,7 @@ namespace fph {
                 }
             }
 
-            slot_type *GetNextSlotAddress(slot_type* FPH_RESTRICT pair_ptr) const FPH_RESTRICT {
+            slot_type *GetNextSlotAddress(slot_type* FPH_RESTRICT pair_ptr) const FPH_FUNC_RESTRICT {
                 const auto *slot_end = slot_ + param_->item_num_ceil_;
                 for (size_t slot_dis = 1; slot_dis < param_->item_num_ceil_; ++slot_dis) {
                     // TODO: test whether using branch-less will be faster
@@ -2136,7 +2210,7 @@ namespace fph {
                 return nullptr;
             }
 
-            size_t GetNextSlotPos(size_t now_pos) const FPH_RESTRICT {
+            size_t GetNextSlotPos(size_t now_pos) const FPH_FUNC_RESTRICT {
 
                 size_t new_pos = now_pos;
                 for (size_t slot_dis = 1; slot_dis < param_->item_num_ceil_; ++slot_dis) {
@@ -2445,12 +2519,6 @@ namespace fph {
                     rehash(param_->item_num_ceil_ + 1U);
                 }
 
-#ifndef NDEBUG
-                if (key_equal_(slot_[GetSlotPos(*param_->second_default_key_)].key, *param_->second_default_key_)) {
-                    int a = 0;
-                }
-#endif
-
                 auto possible_pos = GetSlotPos(key);
                 auto *insert_address = slot_ + possible_pos;
                 bool insert_flag;
@@ -2495,10 +2563,6 @@ namespace fph {
                         bool pattern_matched_flag = false;
 
                         auto &temp_bucket = param_->bucket_array_[bucket_index];
-
-                        if (temp_bucket.key_array.size() > 0) {
-                            int a = 0;
-                        }
 
                         temp_bucket.key_array.push_back(&key);
                         bool is_first_try = true;
@@ -2601,7 +2665,6 @@ namespace fph {
                             for (auto it = begin(); it != end(); ) {
                                 std::allocator_traits<Allocator>::construct(param_->alloc_,
                                                                             temp_value_buf++, std::move(*it));
-                                auto *it_ptr = std::addressof(*it);
                                 ++it;
                             }
 
@@ -2609,7 +2672,7 @@ namespace fph {
                                     slot_type::GetSlotAddressByValueAddress(temp_value_buf);
                             std::allocator_traits<KeyAllocator>::construct(key_alloc,
                                                                            std::addressof(temp_slot_ptr->key), key);
-                            size_t old_item_num = param_->item_num_;
+
                             ++param_->item_num_;
                             Build<true, true, true>(temp_value_buf_start,
                                                     temp_value_buf_start + param_->item_num_, seed1_,
@@ -2640,11 +2703,7 @@ namespace fph {
                             insert_address = slot_ + temp_pos;
                         }
                         else {
-#ifndef NDEBUG
-                            if (bucket_index == 15) {
-                                int a = 0;
-                            }
-#endif
+
                             param_->temp_byte_buf_vec_.resize(
                                     sizeof(slot_type) * temp_bucket.key_array.size());
                             auto *temp_pair_buf = reinterpret_cast<slot_type *>(param_->temp_byte_buf_vec_.data());
@@ -2856,13 +2915,12 @@ namespace fph {
                     return;
                 }
 
-                value_type *temp_pair_buf = nullptr;
                 if (is_rehash) {
 #ifndef NDEBUG
-                    if (temp_key_num != param_->item_num_) {
-                        fprintf(stderr, "Error, temp_key_num(%lu) != param_->item_num_(%lu)\n",
-                                temp_key_num, param_->item_num_);
-                    }
+//                    if (temp_key_num != param_->item_num_) {
+//                        fprintf(stderr, "Error, temp_key_num(%lld) != param_->item_num_(%zu)\n",
+//                                temp_key_num, param_->item_num_);
+//                    }
                     assert(temp_key_num == param_->item_num_);
 #endif
 
@@ -2871,7 +2929,6 @@ namespace fph {
 
                 size_t key_num = temp_key_num;
 
-                const auto original_item_num_ceil = param_->item_num_ceil_;
                 const size_t old_slot_capacity = param_->slot_capacity_;
                 const size_t old_bucket_capacity = param_->bucket_capacity_;
 
@@ -2958,9 +3015,9 @@ namespace fph {
 
                 if (verbose) {
                     size_t buckets_use_bytes = param_->bucket_num_ * sizeof(BucketParamType);
-                    fprintf(stderr, "dynamic fph map, is_rehash: %d, c: %.3f,  use %lu bucket num, "
-                                    "%lu ceil item num, %lu item num, %lu key num, "
-                                    "buckets use memory: %lu bytes, %.3f bits per key up-bound, ",
+                    fprintf(stderr, "dynamic fph map, is_rehash: %d, c: %.3f,  use %zu bucket num, "
+                                    "%zu ceil item num, %zu item num, %zu key num, "
+                                    "buckets use memory: %zu bytes, %.3f bits per key up-bound, ",
                             is_rehash, c, param_->bucket_num_, param_->item_num_ceil_, param_->item_num_, key_num,
                             buckets_use_bytes, buckets_use_bytes * 8.0 / param_->item_num_ceil_);
 #if FPH_DY_DUAL_BUCKET_SET
@@ -3180,7 +3237,6 @@ namespace fph {
 
 
                 // allocate
-                slot_type* original_slot_ptr = slot_;
                 if (old_slot_capacity < param_->slot_capacity_ || slot_ == nullptr) {
 
                     if (slot_ != nullptr) {
@@ -3248,7 +3304,6 @@ namespace fph {
 
                     param_->default_fill_key_address_ = slot_ + default_key_slot_index;
                     param_->default_fill_key_bucket_index_ = GetBucketIndex(default_key);
-                    int a = 0;
                 }
 
                 auto construct_pair_func_move = [&](value_type &&value, bool only_key) {
@@ -3493,8 +3548,9 @@ namespace fph {
                 return reinterpret_cast<const DynamicMapSlotType<K, V>*>(value_ptr);
             }
 
-            static_assert(IsLayoutCompatible<K, V>::value,
-                          "layout of Key and Value is not compatible");
+            // TODO: handle the situation when Layout is not compatible
+//            static_assert(IsLayoutCompatible<K, V>::value,
+//                          "layout of Key and Value is not compatible");
 
         };
 
@@ -3548,12 +3604,12 @@ namespace fph {
 
         template<class... Args>
         std::pair<iterator, bool> try_emplace(const key_type& k, Args&&... args) {
-            return this-> template TryEmplaceImp(k, std::forward<Args>(args)...);
+            return this-> template TryEmplaceImp<>(k, std::forward<Args>(args)...);
         }
 
         template<class... Args>
         std::pair<iterator, bool> try_emplace(key_type&& k, Args&&... args) {
-            return this-> template TryEmplaceImp(std::move(k), std::forward<Args>(args)...);
+            return this-> template TryEmplaceImp<>(std::move(k), std::forward<Args>(args)...);
         }
 
         T& operator[] (const Key &key) {

@@ -2,6 +2,7 @@
 #include <iostream>
 
 class TestKeyClass {
+
 public:
     explicit TestKeyClass(std::string  s): data(std::move(s)) {}
 
@@ -17,7 +18,6 @@ public:
     }
 
     std::string data;
-protected:
 
 };
 
@@ -56,7 +56,7 @@ void TestFphMap() {
     std::cout << std::endl;
 
     fph_map.insert({TestKeyClass("e"), 5});
-    fph_map.try_emplace(TestKeyClass("f"), 6);
+    fph_map.template try_emplace<>(TestKeyClass("f"), 6);
     fph_map[TestKeyClass("g")] = 7;
     fph_map.erase(TestKeyClass("a"));
 

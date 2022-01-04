@@ -49,12 +49,12 @@ with the template parameter `RandomKeyGenerator`
 5. May invalidates any references and pointers to elements within the table after rehash
 
 ## Build
-Requirement: C++ standard not older than C++17; currently only gcc/clang are supported
+Requirement: C++ standard not older than C++17; currently only tested in GCC/Clang/MSVC (no compile error in MSVC).
 
 FPH library is a header-only library. So you can just add the header file to the header search path 
 of your project to include it.
 
-Or, you can FPH with CMake. Put this repo as a subdirectory of your project and then use it as a 
+Or, you can use FPH with CMake. Put this repo as a subdirectory under your project and then use it as a 
 submodule of your cmake project. For instance, if you put `fph-table` directory under the `third-party`
 directory of your project, you can add the following codes to your `CMakeLists.txt`
 ```cmake
@@ -95,6 +95,7 @@ The following sample shows how to deal with the custom key class:
 #include <iostream>
 
 class TestKeyClass {
+
 public:
     explicit TestKeyClass(std::string  s): data(std::move(s)) {}
 
@@ -110,7 +111,6 @@ public:
     }
 
     std::string data;
-protected:
 
 };
 
@@ -149,7 +149,7 @@ void TestFphMap() {
     std::cout << std::endl;
 
     fph_map.insert({TestKeyClass("e"), 5});
-    fph_map.try_emplace(TestKeyClass("f"), 6);
+    fph_map.template try_emplace<>(TestKeyClass("f"), 6);
     fph_map[TestKeyClass("g")] = 7;
     fph_map.erase(TestKeyClass("a"));
 
