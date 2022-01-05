@@ -104,10 +104,15 @@ namespace fph {
 #define FPH_HAVE_BUILTIN(x) 0
 #endif
 
-#define FPH_HAVE_BUILTIN_OR_GCC_CLANG(x) (FPH_HAVE_BUILTIN(x) || (defined(__GNUC__) || defined(__clang__)))
+#if defined(__GNUC__) || defined(__clang__)
+#   define FPH_HAS_BUILTIN_OR_GCC_CLANG(x) 1
+#else
+#   define FPH_HAS_BUILTIN_OR_GCC_CLANG(x) FPH_HAVE_BUILTIN(x)
+#endif
+
 
 #ifndef FPH_LIKELY
-#   if FPH_HAVE_BUILTIN_OR_GCC_CLANG(__builtin_expect)
+#   if FPH_HAS_BUILTIN_OR_GCC_CLANG(__builtin_expect)
 #       define FPH_LIKELY(x) (__builtin_expect((x), 1))
 #   else
 #       define FPH_LIKELY(x) (x)
@@ -115,7 +120,7 @@ namespace fph {
 #endif
 
 #ifndef FPH_UNLIKELY
-#   if FPH_HAVE_BUILTIN_OR_GCC_CLANG(__builtin_expect)
+#   if FPH_HAS_BUILTIN_OR_GCC_CLANG(__builtin_expect)
 #       define FPH_UNLIKELY(x) (__builtin_expect((x), 0))
 #   else
 #       define FPH_UNLIKELY(x) (x)
@@ -142,11 +147,37 @@ namespace fph {
 #   define FPH_FUNC_RESTRICT
 #endif
 
+// From absl library
+// A function-like feature checking macro that accepts C++11 style attributes.
+// It's a wrapper around `__has_cpp_attribute`, defined by ISO C++ SD-6
+// (https://en.cppreference.com/w/cpp/experimental/feature_test). If we don't
+// find `__has_cpp_attribute`, will evaluate to 0.
+#if defined(__cplusplus) && defined(__has_cpp_attribute)
+// NOTE: requiring __cplusplus above should not be necessary, but
+// works around https://bugs.llvm.org/show_bug.cgi?id=23435.
+#   define FPH_HAVE_CPP_ATTRIBUTE(x) __has_cpp_attribute(x)
+#else
+#   define FPH_HAVE_CPP_ATTRIBUTE(x) 0
+#endif
+
+#ifndef FPH_FALLTHROUGH_INTENDED
+#   if FPH_HAVE_CPP_ATTRIBUTE(fallthrough)
+#       define FPH_FALLTHROUGH_INTENDED [[fallthrough]]
+#   elif FPH_HAVE_CPP_ATTRIBUTE(clang::fallthrough)
+#       define FPH_FALLTHROUGH_INTENDED [[clang::fallthrough]]
+#   elif FPH_HAVE_CPP_ATTRIBUTE(gnu::fallthrough)
+#       define FPH_FALLTHROUGH_INTENDED [[gnu::fallthrough]]
+#   else
+        #define FPH_FALLTHROUGH_INTENDED \
+          do {                            \
+          } while (0)
+#   endif
+#endif
 
     namespace dynamic::detail {
         template <typename> inline constexpr bool always_false_v = false;
 
-#if FPH_HAVE_BUILTIN_OR_GCC_CLANG(__builtin_clz) && FPH_HAVE_BUILTIN_OR_GCC_CLANG(__builtin_clzll)
+#if FPH_HAS_BUILTIN_OR_GCC_CLANG(__builtin_clz) && FPH_HAS_BUILTIN_OR_GCC_CLANG(__builtin_clzll)
 #define FPH_INTERNAL_CONSTEXPR_CLZ constexpr
 #define FPH_INTERNAL_HAS_CONSTEXPR_CLZ 1
 #else
@@ -155,7 +186,7 @@ namespace fph {
 #endif
 
         FPH_INTERNAL_CONSTEXPR_CLZ inline int CountLeadingZero64(uint64_t x) {
-#if FPH_HAVE_BUILTIN_OR_GCC_CLANG(__builtin_clzll)
+#if FPH_HAS_BUILTIN_OR_GCC_CLANG(__builtin_clzll)
             return __builtin_clzll(x);
 #elif defined(_MSC_VER)
             unsigned long result = 0;  // NOLINT(runtime/int)
@@ -171,7 +202,7 @@ namespace fph {
         }
 
         FPH_INTERNAL_CONSTEXPR_CLZ inline int CountLeadingZero32(uint32_t x) {
-#if FPH_HAVE_BUILTIN_OR_GCC_CLANG(__builtin_clz)
+#if FPH_HAS_BUILTIN_OR_GCC_CLANG(__builtin_clz)
             return __builtin_clz(x);
 #elif defined(_MSC_VER)
             unsigned long result = 0;  // NOLINT(runtime/int)
@@ -333,19 +364,26 @@ namespace fph {
             switch (len & 7U) {
                 case 7:
                     h ^= static_cast<uint64_t>(data8[6]) << 48U;
+                    FPH_FALLTHROUGH_INTENDED;
                 case 6:
                     h ^= static_cast<uint64_t>(data8[5]) << 40U;
+                    FPH_FALLTHROUGH_INTENDED;
                 case 5:
                     h ^= static_cast<uint64_t>(data8[4]) << 32U;
+                    FPH_FALLTHROUGH_INTENDED;
                 case 4:
                     h ^= static_cast<uint64_t>(data8[3]) << 24U;
+                    FPH_FALLTHROUGH_INTENDED;
                 case 3:
                     h ^= static_cast<uint64_t>(data8[2]) << 16U;
+                    FPH_FALLTHROUGH_INTENDED;
                 case 2:
                     h ^= static_cast<uint64_t>(data8[1]) << 8U;
+                    FPH_FALLTHROUGH_INTENDED;
                 case 1:
                     h ^= static_cast<uint64_t>(data8[0]);
                     h *= m;
+                    FPH_FALLTHROUGH_INTENDED;
                 default:
                     break;
             }
@@ -1284,6 +1322,8 @@ namespace fph {
                 Build<false, true>(end(), end(), 0, false, DEFAULT_BITS_PER_KEY,
                                    DEFAULT_KEYS_FIRST_PART_RATIO,
                                    DEFAULT_BUCKETS_FIRST_PART_RATIO);
+                (void)hash;
+                (void)equal;
             }
 
             DynamicRawSet(): DynamicRawSet(DEFAULT_INIT_ITEM_NUM_CEIL) {}
@@ -1310,12 +1350,12 @@ namespace fph {
             template< class InputIt >
             DynamicRawSet(InputIt first, InputIt last,
                           size_type bucket_count, const Allocator& alloc ):
-                    DynamicRawSet(first, last, SeedHash(), key_equal(), alloc) {}
+                    DynamicRawSet(first, last, bucket_count, SeedHash(), key_equal(), alloc) {}
 
             template< class InputIt >
             DynamicRawSet(InputIt first, InputIt last, size_type bucket_count,
                           const SeedHash& hash, const Allocator& alloc ):
-                    DynamicRawSet(first, last, hash, key_equal(), alloc) {}
+                    DynamicRawSet(first, last, bucket_count, hash, key_equal(), alloc) {}
 
             DynamicRawSet(const DynamicRawSet &other, const Allocator& alloc):
 #if FPH_DY_DUAL_BUCKET_SET
@@ -1385,11 +1425,6 @@ namespace fph {
                                                           : Allocator() ) {}
 
             DynamicRawSet(DynamicRawSet&& other) noexcept:
-                    item_num_mask_(std::exchange(other.item_num_mask_, 0)),
-
-                    slot_(std::exchange(other.slot_, nullptr)),
-                    param_(std::exchange(other.param_, nullptr)),
-
 #if FPH_DY_DUAL_BUCKET_SET
                     p1_(std::exchange(other.p1_, 0)),
                 p2_(std::exchange(other.p2_, 0)),
@@ -1401,11 +1436,12 @@ namespace fph {
 #else
                     bucket_mask_(std::exchange(other.bucket_mask_, 0)),
 #endif
-
+                    item_num_mask_(std::exchange(other.item_num_mask_, 0)),
                     seed1_(std::exchange(other.seed1_, 0x123456797291071ULL)),
                     seed2_(std::exchange(other.seed2_, 0x832748923732847ULL)),
-
-                    bucket_p_array_(std::exchange(other.bucket_p_array_, nullptr))
+                    bucket_p_array_(std::exchange(other.bucket_p_array_, nullptr)),
+                    slot_(std::exchange(other.slot_, nullptr)),
+                    param_(std::exchange(other.param_, nullptr))
 
             {
                 if (param_ != nullptr) {
@@ -2448,7 +2484,7 @@ namespace fph {
 #endif
                 --temp_bucket.entry_cnt;
                 auto slot_pos = slot_ptr - slot_;
-                assert(slot_pos >= 0 && slot_pos < param_->item_num_ceil_);
+                assert(slot_pos >= 0 && size_t(slot_pos) < (param_->item_num_ceil_));
                 auto y_pos = param_->map_table_[slot_pos];
                 assert(y_pos < param_->filled_count_);
                 std::swap(param_->random_table_[param_->filled_count_ - 1],
@@ -2460,7 +2496,7 @@ namespace fph {
 
                 std::allocator_traits<Allocator>::destroy(param_->alloc_, std::addressof(slot_ptr->mutable_value));
                 KeyAllocator key_alloc{};
-                if FPH_LIKELY(slot_ptr - slot_ != GetSlotPos(*param_->default_fill_key_)) {
+                if FPH_LIKELY(size_t(slot_ptr - slot_) != GetSlotPos(*param_->default_fill_key_)) {
                     std::allocator_traits<KeyAllocator>::construct(key_alloc,
                                                                    std::addressof(slot_ptr->key),
                                                                    *param_->default_fill_key_);
@@ -2579,9 +2615,6 @@ namespace fph {
 
                             for (const auto *key_ptr: temp_bucket.key_array) {
                                 size_t temp_hash = hash_(*key_ptr, try_seed) & item_num_mask_;
-#ifndef NDEBUG
-                                size_t debug_slot_pos = GetSlotPos(*key_ptr);
-#endif
                                 bucket_pattern.push_back(temp_hash);
                             }
 
@@ -2777,9 +2810,9 @@ namespace fph {
                                     std::allocator_traits<KeyAllocator>::destroy(key_alloc, &new_second_fill_key);
                                     std::allocator_traits<KeyAllocator>::construct(key_alloc, &new_second_fill_key, (*param_->key_gen_)());
 //                                    new_second_fill_key = (*param_->key_gen_)();
-#ifndef NDEBUG
+#if !defined(NDEBUG) && FPH_DEBUG_FLAG
                                     if (try_gen_second_key_cnt > 100ULL) {
-                                        int a= 0;
+                                        int a = 0;
                                     }
 #endif
                                     // TODO: free the memory when throw
@@ -2858,11 +2891,6 @@ namespace fph {
 
                 } // else of if FPH_UNLIKELY(key_equal_(insert_address->key, key))
 
-#ifndef NDEBUG
-                if (key_equal_(slot_[GetSlotPos(*param_->second_default_key_)].key, *param_->second_default_key_)) {
-                    int a = 0;
-                }
-#endif
 
                 return std::make_pair(insert_address, insert_flag);
             }
@@ -2921,7 +2949,7 @@ namespace fph {
 //                        fprintf(stderr, "Error, temp_key_num(%lld) != param_->item_num_(%zu)\n",
 //                                temp_key_num, param_->item_num_);
 //                    }
-                    assert(temp_key_num == param_->item_num_);
+                    assert(size_t(temp_key_num) == param_->item_num_);
 #endif
 
                 }
@@ -3051,11 +3079,6 @@ namespace fph {
                     auto update_bucket_func = [&](const value_type &value) {
                         const auto *slot_ptr = reinterpret_cast<const slot_type *>(&value);
                         size_t hash_value = GetBucketIndex(slot_ptr->key);
-#ifndef NDEBUG
-                        if (hash_value >= param_->bucket_num_) {
-                            int a = 0;
-                        }
-#endif
                         assert(hash_value < param_->bucket_num_);
                         auto &temp_bucket = param_->bucket_array_[hash_value];
                         ++temp_bucket.entry_cnt;
@@ -3266,7 +3289,7 @@ namespace fph {
 
                     key_type fill_key = (*param_->key_gen_)();
                     while (GetSlotPos(fill_key) == default_key_slot_index) {
-#ifndef NDEBUG
+#if !defined(NDEBUG) && FPH_DEBUG_FLAG
                         if (try_fill_key_time > 1000) {
                             int a = 0;
                         }
@@ -3306,26 +3329,45 @@ namespace fph {
                     param_->default_fill_key_bucket_index_ = GetBucketIndex(default_key);
                 }
 
-                auto construct_pair_func_move = [&](value_type &&value, bool only_key) {
-                    slot_type* slot_ptr = slot_type::GetSlotAddressByValueAddress(std::addressof(value));
-                    auto slot_pos = GetSlotPos(slot_ptr->key);
-                    auto *insert_address = slot_ + slot_pos;
-                    KeyAllocator key_alloc{};
-                    std::allocator_traits<KeyAllocator>::destroy(key_alloc, std::addressof(insert_address->key));
-                    if (only_key) {
-                        std::allocator_traits<KeyAllocator>::construct(key_alloc, std::addressof(insert_address->key), std::move(slot_ptr->key));
+
+
+                if constexpr (use_move || (is_rehash && std::is_move_constructible<value_type>::value)) {
+                    auto construct_pair_func_move = [&](value_type &&value, bool only_key) {
+                        slot_type* slot_ptr = slot_type::GetSlotAddressByValueAddress(std::addressof(value));
+                        auto slot_pos = GetSlotPos(slot_ptr->key);
+                        auto *insert_address = slot_ + slot_pos;
+                        KeyAllocator key_alloc{};
+                        std::allocator_traits<KeyAllocator>::destroy(key_alloc, std::addressof(insert_address->key));
+                        if (only_key) {
+                            std::allocator_traits<KeyAllocator>::construct(key_alloc, std::addressof(insert_address->key), std::move(slot_ptr->key));
+                        }
+                        else {
+                            std::allocator_traits<Allocator>::construct(param_->alloc_,
+                                                                        std::addressof(insert_address->mutable_value),
+                                                                        std::move(value));
+                        }
+                    };
+                    if constexpr (is_rehash) {
+                        size_t temp_key_cnt = 0;
+                        for (auto it = pair_begin; it != pair_end; ++it) {
+                            ++temp_key_cnt;
+                            bool only_key = last_element_only_has_key && (temp_key_cnt == key_num);
+                            static_assert(std::is_move_constructible<value_type>::value);
+                            construct_pair_func_move(std::move(*it), only_key);
+
+                        }
                     }
                     else {
-                        std::allocator_traits<Allocator>::construct(param_->alloc_,
-                                                                    std::addressof(insert_address->mutable_value),
-                                                                    std::move(value));
+                        static_assert(use_move);
+                        size_t temp_key_cnt = 0;
+                        for (auto it = pair_begin; it != pair_end; ++it) {
+                            ++temp_key_cnt;
+                            bool only_key = last_element_only_has_key && (temp_key_cnt == key_num);
+                            construct_pair_func_move(std::move(*it), only_key);
+                        }
                     }
-                };
-
-
-
-                if constexpr (!use_move) {
-
+                }
+                else {
                     auto construct_pair_func = [&](InputIt it, bool only_key) {
                         const slot_type* slot_ptr = slot_type::GetSlotAddressByValueAddress(std::addressof(*it));
                         auto slot_pos = GetSlotPos(slot_ptr->key);
@@ -3349,29 +3391,18 @@ namespace fph {
                             bool only_key = last_element_only_has_key && (temp_key_cnt == key_num);
                             construct_pair_func(it, only_key);
                         }
-                    } else {
+                    }
+                    else {
                         size_t temp_key_cnt = 0;
                         for (auto it = pair_begin; it != pair_end; ++it) {
                             ++temp_key_cnt;
                             bool only_key = last_element_only_has_key && (temp_key_cnt == key_num);
-                            if constexpr (std::is_move_constructible<value_type>::value) {
-                                construct_pair_func_move(std::move(*it), only_key);
-                            }
-                            else {
-                                construct_pair_func(it, only_key);
-                            }
+                            assert(!std::is_move_constructible<value_type>::value);
+                            construct_pair_func(it, only_key);
                         }
                     }
                 }
-                else {
-                    size_t temp_key_cnt = 0;
-                    for (auto it = pair_begin; it != pair_end; ++it) {
-                        ++temp_key_cnt;
-//                        bool only_key = false;
-                        bool only_key = last_element_only_has_key && (temp_key_cnt == key_num);
-                        construct_pair_func_move(std::move(*it), only_key);
-                    }
-                }
+
 
 
 #if FPH_ENABLE_ITERATOR

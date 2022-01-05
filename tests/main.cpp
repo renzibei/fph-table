@@ -2,7 +2,7 @@ void TestSet();
 void TestFPH();
 void TestMapPerformance();
 
-int main(int argc, char **argv) {
+int main() {
     TestSet();
     TestFPH();
     TestMapPerformance();

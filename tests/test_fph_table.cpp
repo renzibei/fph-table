@@ -97,7 +97,7 @@ public:
     explicit TestKeyClass(std::string  s): data(std::move(s)) {}
     TestKeyClass(const TestKeyClass& o): data(o.data) {}
 //    TestKeyClass(TestKeyClass&& o) = delete;
-//    TestKeyClass(TestKeyClass&& o) noexcept : data(std::move(o.data)) {}
+    TestKeyClass(TestKeyClass&& o) noexcept : data(std::move(o.data)) {}
     TestKeyClass& operator=(const TestKeyClass&o) = delete;
     TestKeyClass& operator=(TestKeyClass&&o) = delete;
 
@@ -143,7 +143,7 @@ struct TestKeySeedHash {
 class KeyClassRNG {
 public:
     KeyClassRNG(): init_seed(std::random_device{}()), string_gen(init_seed) {};
-    KeyClassRNG(size_t seed): string_gen(seed), init_seed(seed) {}
+    KeyClassRNG(size_t seed):  init_seed(seed), string_gen(seed) {}
 
     TestKeyClass operator()() {
         return TestKeyClass(string_gen());
@@ -163,7 +163,7 @@ protected:
 class ValueClassRNG {
 public:
     ValueClassRNG(): init_seed(std::random_device{}()), string_gen(init_seed) {};
-    ValueClassRNG(size_t seed): string_gen(seed), init_seed(seed) {}
+    ValueClassRNG(size_t seed): init_seed(seed), string_gen(seed) {}
 
     TestValueClass operator()() {
         return TestValueClass(string_gen());
@@ -237,7 +237,7 @@ bool IsTableSame(const Table1 &table1, const Table2 &table2) {
 template< class Table, class BenchTable, class PairVec, class GetKey = SimpleGetKey<typename Table::value_type>,
         class ValueEqual = std::equal_to<typename Table::value_type> >
 bool TestInsertCorrectness(Table &table, BenchTable &bench_table, PairVec &pair_vec1, PairVec &pair_vec2, size_t test_index = 0) {
-
+    (void)test_index;
     try {
         table.clear();
         bench_table.clear();
@@ -250,9 +250,6 @@ bool TestInsertCorrectness(Table &table, BenchTable &bench_table, PairVec &pair_
         if constexpr(std::is_copy_constructible_v<typename Table::value_type>) {
             for (const auto &pair: pair_vec1) {
 
-                if (pair_cnt == 12U) {
-                    int a = 0;
-                }
 
 
                 auto[bench_insert_it, bench_ok] = bench_table.insert(pair);
@@ -535,7 +532,6 @@ bool TestEraseCorrectness(Table &table, BenchTable &bench_table, PairVec &pair_v
         std::uniform_int_distribution<size_t> seed_gen;
 
         size_t pair_cnt = 0;
-        size_t last_erase_pair_index = 0;
         std::vector<typename Table::key_type> key_seq_vec;
         std::vector<bool> operation_seq_vec;
         key_seq_vec.reserve(pair_vec1.size());
@@ -544,11 +540,8 @@ bool TestEraseCorrectness(Table &table, BenchTable &bench_table, PairVec &pair_v
 //            const auto &pair = pair_vec[i];
             auto temp_seed = seed_gen(random_engine);
 
-            if (pair_cnt == 12) {
-                int a = 0;
-            }
 
-            bool do_erase_flag = false;
+//            bool do_erase_flag = false;
 
             if (i > 0 && temp_seed % 2U == 1U) {
                 size_t try_erase_pos = seed_gen(random_engine) % i;
@@ -557,8 +550,8 @@ bool TestEraseCorrectness(Table &table, BenchTable &bench_table, PairVec &pair_v
 
                 key_seq_vec.push_back(temp_key);
                 operation_seq_vec.push_back(false);
-                do_erase_flag = true;
-                last_erase_pair_index = try_erase_pos;
+//                do_erase_flag = true;
+//                last_erase_pair_index = try_erase_pos;
                 if (bench_table.find(temp_key) != bench_table.end()) {
 
 
@@ -572,8 +565,8 @@ bool TestEraseCorrectness(Table &table, BenchTable &bench_table, PairVec &pair_v
                             return false;
                         }
                     } else {
-                        auto bench_erase_it = bench_table.erase(bench_table.find(temp_key));
-                        auto table_erase_it = table.erase(table.find(temp_key));
+                        bench_table.erase(bench_table.find(temp_key));
+                        table.erase(table.find(temp_key));
                     }
                 }
             }
@@ -616,7 +609,7 @@ bool TestEraseCorrectness(Table &table, BenchTable &bench_table, PairVec &pair_v
 
         for (auto it = bench_table.begin(); it != bench_table.end();) {
             auto temp_key = GetKey{}(*it);
-            auto table_it = table.erase(table.find(temp_key));
+            table.erase(table.find(temp_key));
             it = bench_table.erase(it);
 //            if (!IsTableSame<Table, BenchTable, GetKey, ValueEqual>(table, bench_table)) {
 //                LogHelper::log(Error, "table not same during erase key %s in past half", std::to_string(temp_key).c_str());
@@ -830,7 +823,6 @@ template<class Table, class BenchTable, class ValueRandomGen>
 bool TestInitList(size_t seed, ValueRandomGen value_gen) {
     if constexpr (std::is_copy_constructible_v<typename Table::value_type>) {
         std::mt19937_64 int_engine(seed);
-
         {
             size_t temp_seed = int_engine();
             value_gen.seed(temp_seed);
@@ -907,9 +899,6 @@ bool TestCorrectness(size_t max_elem_num, size_t test_time) {
             auto ele_num = test_elem_num_array[k];
             ++test_index;
 
-            if (test_index == 5881) {
-                int a = 0;
-            }
 
             src_vec1.clear();
             src_vec2.clear();
@@ -1013,7 +1002,6 @@ bool TestCorrectness(size_t max_elem_num, size_t test_time) {
             }
             Clear(table_ptr, test_index);
 
-            bool is_pair_flag = is_pair<value_type>::value;
 
             if constexpr(is_pair<value_type>::value) {
                 if constexpr (is_base_same<typename value_type::first_type, key_type>::value) {
@@ -1141,7 +1129,6 @@ std::tuple<uint64_t, uint64_t> TestTableLookUp(Table &table, size_t lookup_time,
     size_t look_up_index = 0;
     size_t key_num = input_vec.size();
     uint64_t useless_sum = 0;
-    volatile bool error_flag = false;
     if (input_vec.empty()) {
         return {0, 0};
     }
@@ -1197,6 +1184,7 @@ template<TableType table_type, bool do_reserve = true, bool verbose = true, clas
 uint64_t TestTableConstruct(Table &table, const PairVec &pair_vec, size_t seed = 0, double c = 2.0,
                             double max_load_factor = 0.9,
                             size_t test_time = 0) {
+    (void)test_time;
     table.clear();
     auto begin_time = std::chrono::high_resolution_clock::now();
     if constexpr (table_type == DYNAMIC_FPH_TABLE) {
@@ -1346,17 +1334,17 @@ void TestTablePerformance(size_t element_num, size_t construct_time, size_t look
 
 
 void TestSet() {
-    using KeyType = uint64_t;
+//    using KeyType = uint64_t;
 //    using KeyType = std::string;
-//    using KeyType = TestKeyClass;
+    using KeyType = TestKeyClass;
 //    using SeedHash = fph::SimpleSeedHash<KeyType>;
-//    using SeedHash = TestKeySeedHash;
-    using SeedHash = fph::MixSeedHash<KeyType>;
+    using SeedHash = TestKeySeedHash;
+//    using SeedHash = fph::MixSeedHash<KeyType>;
 //    using SeedHash = fph::StrongSeedHash<KeyType>;
     using BucketParamType = uint32_t;
 
-    using RandomKeyGenerator = fph::dynamic::RandomGenerator<KeyType>;
-//    using RandomKeyGenerator = KeyClassRNG;
+//    using RandomKeyGenerator = fph::dynamic::RandomGenerator<KeyType>;
+    using RandomKeyGenerator = KeyClassRNG;
 
     fph::DynamicFphSet<KeyType, SeedHash, std::equal_to<>,
     std::allocator<KeyType>, BucketParamType, RandomKeyGenerator> dy_fph_set;
@@ -1370,16 +1358,11 @@ void TestSet() {
 
     //    using HashMethod = robin_hood::hash<KeyType>;
 //    using HashMethod = absl::Hash<KeyType>;
-//    using HashMethod = TestKeyHash;
-    using HashMethod = std::hash<KeyType>;
+    using HashMethod = TestKeyHash;
+//    using HashMethod = std::hash<KeyType>;
 
-    constexpr size_t KEY_NUM = 910ULL;
-    constexpr size_t LOOKUP_TIME = 200000000ULL;
-    constexpr size_t CONSTRUCT_TIME = 5;
-    constexpr double TEST_MAX_LOAD_FACTOR = 0.95;
     constexpr double TEST_CORR_MAX_LOAD_FACTOR = 0.7;
 
-    constexpr double c = 2.0;
 
 //    using BenchTable = absl::flat_hash_set<KeyType, HashMethod>;
     using BenchTable = std::unordered_set<KeyType, HashMethod>;
@@ -1441,28 +1424,28 @@ struct FixSizeStruct {
 
 
 void TestFPH() {
-    using KeyType = uint32_t;
-//    using KeyType = TestKeyClass;
+//    using KeyType = uint32_t;
+    using KeyType = TestKeyClass;
 //    using KeyType = std::string;
-    using ValueType = uint64_t;
-//    using ValueType = TestValueClass;
+//    using ValueType = uint64_t;
+    using ValueType = TestValueClass;
 //    using ValueType = std::string;
 //    using ValueType = FixSizeStruct<96>;
-    using BucketParamType = uint32_t;
+//    using BucketParamType = uint32_t;
 
-//    using KeyRandomGen = KeyClassRNG;
-    using KeyRandomGen = fph::dynamic::RandomGenerator<KeyType>;
+    using KeyRandomGen = KeyClassRNG;
+//    using KeyRandomGen = fph::dynamic::RandomGenerator<KeyType>;
 
-    using ValueRandomGen = fph::dynamic::RandomGenerator<ValueType>;
-//    using ValueRandomGen = ValueClassRNG;
+//    using ValueRandomGen = fph::dynamic::RandomGenerator<ValueType>;
+    using ValueRandomGen = ValueClassRNG;
 
     using RandomGenerator = RandomPairGen<KeyType, ValueType, KeyRandomGen , ValueRandomGen>;
 
 
 //    using SeedHash = fph::SimpleSeedHash<KeyType>;
 //    using SeedHash = fph::StrongSeedHash<KeyType>;
-    using SeedHash = fph::MixSeedHash<KeyType>;
-//    using SeedHash = TestKeySeedHash;
+//    using SeedHash = fph::MixSeedHash<KeyType>;
+    using SeedHash = TestKeySeedHash;
 
     using DyFphMap7bit = fph::DynamicFphMap<KeyType, ValueType, SeedHash, std::equal_to<>,
     std::allocator<std::pair<const KeyType, ValueType>>, uint8_t, KeyRandomGen>;
@@ -1473,15 +1456,15 @@ void TestFPH() {
 
     using DyFphMap31bit = fph::DynamicFphMap<KeyType, ValueType, SeedHash, std::equal_to<>,
     std::allocator<std::pair<const KeyType, ValueType>>, uint32_t, KeyRandomGen>;
-    using DyFphMap63bit = fph::DynamicFphMap<KeyType, ValueType, SeedHash, std::equal_to<>,
-    std::allocator<std::pair<const KeyType, ValueType>>, uint64_t, KeyRandomGen>;
+//    using DyFphMap63bit = fph::DynamicFphMap<KeyType, ValueType, SeedHash, std::equal_to<>,
+//    std::allocator<std::pair<const KeyType, ValueType>>, uint64_t, KeyRandomGen>;
 
     static_assert(is_pair<typename DyFphMap7bit::value_type>::value);
 
 //    using HashMethod = robin_hood::hash<KeyType>;
 //    using HashMethod = absl::Hash<KeyType>;
-    using HashMethod = std::hash<KeyType>;
-//    using HashMethod = TestKeyHash;
+//    using HashMethod = std::hash<KeyType>;
+    using HashMethod = TestKeyHash;
 
 //    using BenchTable = absl::flat_hash_map<KeyType, ValueType, HashMethod>;
     using BenchTable = std::unordered_map<KeyType, ValueType, HashMethod>;
@@ -1498,18 +1481,11 @@ void TestFPH() {
 //    absl::flat_hash_map<KeyType, ValueType, HashMethod> absl_map;
 //    robin_hood::unordered_flat_map<KeyType, ValueType, HashMethod> robin_hood_map;
 
-    using PairType = std::pair<KeyType, ValueType>;
-    constexpr size_t KEY_NUM = 3310ULL;
-    constexpr size_t LOOKUP_TIME = 2000000ULL;
-    constexpr size_t CONSTRUCT_TIME = 5;
+//    using PairType = std::pair<KeyType, ValueType>;
     constexpr double TEST_CORR_MAX_LOAD_FACTOR = 0.7;
-    constexpr double TEST_MAX_LOAD_FACTOR = 0.6;
-
-    constexpr double c = 2.0;
 
 
     std::random_device random_device;
-    std::mt19937_64 random_engine(random_device());
     std::uniform_int_distribution<size_t> random_gen;
 
 
