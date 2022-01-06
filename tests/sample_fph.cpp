@@ -21,19 +21,22 @@ public:
 
 };
 
+// The hash function of the custom key type need to take both a key and a seed
 struct TestKeySeedHash {
     size_t operator()(const TestKeyClass &src, size_t seed) const {
         return fph::MixSeedHash<std::string>{}(src.data, seed);
     }
 };
 
+// a random key generator is needed for the Fph Hash Table;
+// If using a custom class, a random generator of the key should be provided.
 class KeyClassRNG {
 public:
     KeyClassRNG(): string_gen(std::random_device{}()) {};
 
     TestKeyClass operator()() {
         return TestKeyClass(string_gen());
-    }
+}
 
 
 protected:
@@ -44,10 +47,15 @@ void TestFphMap() {
     using KeyType = TestKeyClass;
     using MappedType = uint64_t;
     using SeedHash = TestKeySeedHash;
+    using Allocator = std::allocator<std::pair<const KeyType, MappedType>>;
+    using BucketParamType = uint32_t;
     using KeyRNG = KeyClassRNG;
-    using FphMap = fph::DynamicFphMap<KeyType, MappedType, SeedHash, std::equal_to<>, std::allocator<std::pair<const KeyType, MappedType>>, uint32_t, KeyRNG>;
 
-    FphMap fph_map = {{TestKeyClass("a"), 1}, {TestKeyClass("b"), 2}, {TestKeyClass("c"), 3}, {TestKeyClass("d"), 4} };
+    using FphMap = fph::DynamicFphMap<KeyType, MappedType, SeedHash, std::equal_to<>, Allocator,
+                                        BucketParamType , KeyRNG>;
+
+    FphMap fph_map = {{TestKeyClass("a"), 1}, {TestKeyClass("b"), 2}, {TestKeyClass("c"), 3},
+                        {TestKeyClass("d"), 4} };
 
     std::cout << "Fph map has elements: " << std::endl;
     for (const auto& [k, v]: fph_map) {
@@ -72,7 +80,9 @@ void TestFphMap() {
     if (fph_map.contains(TestKeyClass("b"))) {
         std::cout << "Found \"f\" in map" << std::endl;
     }
-    std::cout << "Value with key \"g\" is " << fph_map.GetPointerNoCheck(TestKeyClass("g"))->second << std::endl;
+    std::cout << "Value with key \"g\" is "
+              << fph_map.GetPointerNoCheck(TestKeyClass("g"))->second
+              << std::endl;
 }
 
 int main() {
