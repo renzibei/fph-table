@@ -5,7 +5,7 @@ table (no collisions for the hash), which makes the hash map/set extremely fast 
 
 We provide two container classes `fph::DynamicFphSet` and `fph::DynamicFphMap`. The APIs of these two
 classes are almost the same as those of `std::unordered_set` and `std::unordered_map`, but there are some 
-minor differences, which we will explain in detail below. In order to compile this code, you need 
+minor differences, which we will explain in detail below. To compile this code, you need 
 to use at least C++17 or newer standards.
 
 Generally speaking, the containers here are suitable for the situation where the performance of the 
@@ -20,23 +20,23 @@ number of times the data is read from the memory, and the cost of each memory ac
 Almost every hash table dedicated to optimizing query performance will take some measures to reduce 
 the number of memory accesses. For example, Google's [absl hash table](https://abseil.io/blog/20180927-swisstables) 
 uses metadata and SIMD instruction to reduce the number of memory fetches; robin hood hashing is
-aimed at reduce the variance of probe distances, which can make the lookup more cache-friendly.
+aimed at reducing the variance of probe distances, which can make the lookup more cache-friendly.
 
 Perfect hashing, by definition, minimizes the number of hashes and the number of memory accesses. 
 It only needs to fetch the memory once to get the required data from the slots. Of course, the fly 
-in the ointment is that the perfect hash function itself requires a parameter space that is 
-proportional to the number of keys. Fortunately, the extra required by FPH is not worth mentioning 
+in the ointment is that the perfect hash function itself requires the parameter space that is 
+proportional to the number of keys. Fortunately, the extra space required by FPH is not worth mentioning 
 compared to the slots for storing data, and this space will not cause a significant increase in the cache miss rate.
 
 The idea of FPH originates from the [FCH algorithm](https://dl.acm.org/doi/abs/10.1145/133160.133209),
 which is a perfect hash algorithm suitable for implementation. With full awareness of modern computer system architecture, FPH 
 has improved and optimized the FCH algorithm for query speed. In addition, we let the perfect hash table support dynamic modification, although the cost of dynamic modification is relatively high at present.
 
-The FCH algorithm use a two-step method when choosing the hash method, which may bring branches to 
-the pipeline. We skip a step to make the hashing process easier. This speeds up the query step, 
-but also makes the process of constructing the hash slower.
+The FCH algorithm uses a two-step method when choosing the hash method, which may bring branches to 
+the pipeline. We skip a step to make the hashing process easier. This speeds up the query step
+but makes the process of constructing the hash slower.
 
-In order to be able to dynamically add key values to the hash table, whenever a new key value makes 
+To be able to dynamically add key values to the hash table, whenever a new key makes 
 the hash no longer a perfect hash, we will rebuild the hash table.
 
 ## Difference compared to std
@@ -55,7 +55,7 @@ FPH library is a header-only library. So you can just add the header file to the
 of your project to include it.
 
 Or, you can use FPH with CMake. Put this repo as a subdirectory under your project and then use it as a 
-submodule of your cmake project. For instance, if you put `fph-table` directory under the `third-party`
+submodule of your CMake project. For instance, if you put the `fph-table` directory under the `third-party`
 directory of your project, you can add the following codes to your `CMakeLists.txt`
 ```cmake
 add_subdirectory(third-party/fph-table)
@@ -67,7 +67,7 @@ When you have added the `fph-table` directory to your header, use can include th
 `#include "fph/dynamic_fph_table.h"` to your codes.
 
 ## Test
-In order to test that fph has no compile and run errors on your system, you can use the test code we 
+To test that fph has no compile and run errors on your system, you can use the test code we 
 provide using the following commands.
 
 
@@ -99,7 +99,7 @@ class TestKeyClass {
 public:
     explicit TestKeyClass(std::string  s): data(std::move(s)) {}
 
-    // The key_type of fph table need to be copy constructable, assignment operator is not needed
+    // The key_type of fph table need to be copy constructible, assignment operators are not needed
     TestKeyClass(const TestKeyClass&o) = default;
     TestKeyClass(TestKeyClass&&o) = default;
 
@@ -187,8 +187,8 @@ to be in the hash table. There is one comparison and branch instruction in the `
 while the `pointer GetPointerNoCheck(const key_type &key)` function does not contain any comparison
 or branch, as a result of which it's faster.
 
-A 'slot' is the space reserved for a value(key for set, <K,V> for map). One slot in fph will at
-most contain one value. We use an exponential multiple of 2 size for slots. Saying that the number 
+A 'slot' is the space reserved for a value(key for a set, <K,V> for a map). One slot in fph will at
+most contain one value. We use an exponential multiple of 2 for the size of slots. Saying that the number 
 of slots is m and the element number is n. n <= m and the size of slots will be 
 `sizeof(value_type) * m` bytes
 
@@ -205,7 +205,7 @@ smaller slots if the load_factor can be smaller in that case. (Make sure almost 
 be added to the table after this because the insert operation will be very slow when the
 load_factor is very large.)
 
-The extra hot memory space except slots during querying is the space for buckets (this concept is 
+The extra hot memory space besides slots during querying is the space for buckets (this concept is 
 not the bucket in the STL unordered_set, it is from FCH algorithm), the size of
 this extra memory is about `c * n / (log2(n) + 1) * sizeof(BucketParamType)` bytes. c is a
 parameter that must be larger than 1.5. The larger c is, the quicker it will be for the
@@ -221,16 +221,16 @@ We provide three kinds of SeedHash function for basic types: `fph::SimpleSeedHas
 The SimpleSeedHash has the fastest calculation speed and the weakest hash distribution, while the
 StrongSeedHash is the slowest of them to calculate but has the best distribution of hash value.
 The MixSeedHash is in the mid of them.
-Take integer for an example, if the keys you want to insert is not uniformly distributed in
+Take integer for an example, if the keys you want to insert are not uniformly distributed in
 the integer interval of that type, then the hash value may probably not be uniformly distributed
 in the hash type interval as well for a weak hash function. But with a strong hash function,
 you can easily produce uniformly distributed hash values regardless of your input distribution.
 If the hash values of the input keys are not uniformly distributed, there may be a failure in the
 building of the hash table.
 
-Tips: Know your input keys patterns before choosing the seed hash function. If your keys may
+Tips: Know the patterns of the input keys before choosing the seed hash function. If the keys may
 cause a failure in the building of the table, use a stronger seed hash function.
 
-If you want to write your custom seed hash function for your own class, refer to the
+If the user wants to write a custom seed hash function for the key type, refer to the
 fph::SimpleSeedHash<T>; the functor needs to take both a key and a seed (size_t) as input arguments and
 return a size_t type hash value;

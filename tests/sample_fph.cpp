@@ -6,7 +6,7 @@ class TestKeyClass {
 public:
     explicit TestKeyClass(std::string  s): data(std::move(s)) {}
 
-    // The key_type of fph table need to be copy constructable, assignment operator is not needed
+    // The key_type of fph table need to be copy constructible, assignment operators are not needed
     TestKeyClass(const TestKeyClass&o) = default;
     TestKeyClass(TestKeyClass&&o) = default;
 
