@@ -438,6 +438,13 @@ namespace fph {
             return key;
         }
 
+        FPH_ALWAYS_INLINE uint64_t Ano4SeedHash64(uint64_t key, uint64_t seed) {
+            key ^= key >> 37U;
+            key *= seed;
+            key ^= key >> 32U;
+            return key;
+        }
+
         FPH_ALWAYS_INLINE uint64_t Ano2SeedHash32(uint32_t key, uint64_t seed) {
             uint64_t m = uint64_t(key) * seed;
             auto ret = m ^ (m >> 33U);
@@ -529,6 +536,14 @@ namespace fph {
             return ret;
         }
 
+        FPH_ALWAYS_INLINE size_t MulMovSeedHash64(uint64_t key, uint64_t seed) {
+//            size_t seed_m = seed & 63UL;
+            key ^= (key >> 33U);
+            auto ret = (seed * key) >> 33U;
+//            auto ret = RotateR(seed * key, 33U);
+            return ret;
+        }
+
         FPH_ALWAYS_INLINE uint64_t NaiveMulSeedHash64(uint64_t key, uint64_t seed) {
             auto ret = key * (seed & 1ULL) ;
             return ret;
@@ -573,7 +588,9 @@ namespace fph {
         }
 
         size_t ChosenMixSeedHash64(uint64_t key, size_t seed) {
-            return RevMulSeedHash64(key, seed);
+//            return RevMulSeedHash64(key, seed);
+            return MulMovSeedHash64(key, seed);
+//            return Ano4SeedHash64(key, seed);
         }
 
         size_t ChosenStrongSeedHash64(uint64_t key, size_t seed) {
