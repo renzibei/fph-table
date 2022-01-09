@@ -168,7 +168,7 @@ namespace fph {
 #   elif FPH_HAVE_CPP_ATTRIBUTE(gnu::fallthrough)
 #       define FPH_FALLTHROUGH_INTENDED [[gnu::fallthrough]]
 #   else
-        #define FPH_FALLTHROUGH_INTENDED \
+#define FPH_FALLTHROUGH_INTENDED \
           do {                            \
           } while (0)
 #   endif
@@ -181,7 +181,7 @@ namespace fph {
 #define FPH_INTERNAL_CONSTEXPR_CLZ constexpr
 #define FPH_INTERNAL_HAS_CONSTEXPR_CLZ 1
 #else
-#define FPH_INTERNAL_CONSTEXPR_CLZ
+        #define FPH_INTERNAL_CONSTEXPR_CLZ
 #define FPH_INTERNAL_HAS_CONSTEXPR_CLZ 0
 #endif
 
@@ -438,6 +438,13 @@ namespace fph {
             return key;
         }
 
+        FPH_ALWAYS_INLINE uint64_t Ano5SeedHash64(uint64_t key, uint64_t seed) {
+            key ^= key >> 33U;
+            key *= seed;
+            key ^= key << 33U;
+            return key;
+        }
+
         FPH_ALWAYS_INLINE uint64_t Ano4SeedHash64(uint64_t key, uint64_t seed) {
             key ^= key >> 37U;
             key *= seed;
@@ -503,6 +510,11 @@ namespace fph {
             return key;
         }
 
+        constexpr FPH_ALWAYS_INLINE uint64_t MulOnlyHash64(uint64_t key, uint64_t seed) {
+            uint64_t ret = key * seed;
+            return ret;
+        }
+
         FPH_ALWAYS_INLINE size_t RotMul3SeedHash64(uint64_t key, uint64_t seed) {
             uint64_t mul = key * seed;
             key = mul ^ RotateR(mul, 48U);
@@ -537,10 +549,14 @@ namespace fph {
         }
 
         FPH_ALWAYS_INLINE size_t MulMovSeedHash64(uint64_t key, uint64_t seed) {
-//            size_t seed_m = seed & 63UL;
             key ^= (key >> 33U);
             auto ret = (seed * key) >> 33U;
-//            auto ret = RotateR(seed * key, 33U);
+            return ret;
+        }
+
+        FPH_ALWAYS_INLINE size_t ShiftMulSeedHash64(uint64_t key, uint64_t seed) {
+            key ^= (key >> 33U);
+            auto ret = (seed * key);
             return ret;
         }
 
@@ -583,13 +599,15 @@ namespace fph {
             }
         };
 
-        size_t ChosenSimpleSeedHash64(uint64_t key, size_t seed) {
-            return RotMulSeedHash64(key, seed);
+        constexpr FPH_ALWAYS_INLINE size_t ChosenSimpleSeedHash64(uint64_t key, size_t seed) {
+//            return RotMulSeedHash64(key, seed);
+            return MulOnlyHash64(key, seed);
         }
 
         size_t ChosenMixSeedHash64(uint64_t key, size_t seed) {
 //            return RevMulSeedHash64(key, seed);
-            return MulMovSeedHash64(key, seed);
+//            return MulMovSeedHash64(key, seed);
+            return ShiftMulSeedHash64(key, seed);
 //            return Ano4SeedHash64(key, seed);
         }
 
@@ -615,105 +633,105 @@ namespace fph {
 
         template<class T, typename = void>
         struct SimpleSeedHash {
-            size_t operator()(const T& x, size_t seed) const {
+            constexpr FPH_ALWAYS_INLINE size_t operator()(const T& x, size_t seed) const noexcept {
                 return dynamic::detail::ChosenSimpleSeedHash64(x, seed);
             }
         };
 
         template<>
         struct SimpleSeedHash<uint32_t> {
-            size_t operator()(uint32_t x, size_t seed) const {
+            size_t operator()(uint32_t x, size_t seed) const noexcept {
                 return dynamic::detail::ChosenSimpleSeedHash64(x, seed);
             }
         };
 
         template<>
         struct SimpleSeedHash<int32_t> {
-            size_t operator()(int32_t x, size_t seed) const {
+            size_t operator()(int32_t x, size_t seed) const noexcept {
                 return dynamic::detail::ChosenSimpleSeedHash64(x, seed);
             }
         };
 
         template<>
         struct SimpleSeedHash<uint16_t> {
-            size_t operator()(uint16_t x, size_t seed) const {
+            size_t operator()(uint16_t x, size_t seed) const noexcept {
                 return dynamic::detail::ChosenSimpleSeedHash64(x, seed);
             }
         };
 
         template<>
         struct SimpleSeedHash<int16_t> {
-            size_t operator()(int16_t x, size_t seed) const {
+            size_t operator()(int16_t x, size_t seed) const noexcept {
                 return dynamic::detail::ChosenSimpleSeedHash64(x, seed);
             }
         };
 
         template<class T>
         struct SimpleSeedHash<T*> {
-            size_t operator()(T* x, size_t seed) const {
+            size_t operator()(T* x, size_t seed) const noexcept {
                 return dynamic::detail::ChosenSimpleSeedHash64(reinterpret_cast<size_t>(x), seed);
             }
         };
 
         template<class CharT>
         struct SimpleSeedHash<std::basic_string<CharT>> {
-            size_t operator()(const std::basic_string<CharT> &str, size_t seed) const {
+            size_t operator()(const std::basic_string<CharT> &str, size_t seed) const noexcept {
                 return dynamic::detail::HashBytes(str.data(), sizeof(CharT) * str.length(), seed);
             }
         };
 
         template<class CharT>
         struct SimpleSeedHash<std::basic_string_view<CharT>> {
-            size_t operator()(const std::basic_string_view<CharT> &str, size_t seed) const {
+            size_t operator()(const std::basic_string_view<CharT> &str, size_t seed) const noexcept {
                 return dynamic::detail::HashBytes(str.data(), sizeof(CharT) * str.length(), seed);
             }
         };
 
         template<class T, typename = void>
         struct MixSeedHash {
-            size_t operator()(const T& x, size_t seed) const {
+            size_t operator()(const T& x, size_t seed) const noexcept {
                 return dynamic::detail::ChosenMixSeedHash64(x, seed);
             }
         };
 
         template<>
         struct MixSeedHash<uint32_t> {
-            size_t operator()(uint32_t x, size_t seed) const {
+            size_t operator()(uint32_t x, size_t seed) const noexcept {
                 return dynamic::detail::ChosenMixSeedHash64(x, seed);
             }
         };
 
         template<>
         struct MixSeedHash<int32_t> {
-            size_t operator()(int32_t x, size_t seed) const {
+            size_t operator()(int32_t x, size_t seed) const noexcept {
                 return dynamic::detail::ChosenMixSeedHash64(x, seed);
             }
         };
 
         template<>
         struct MixSeedHash<uint16_t> {
-            size_t operator()(uint16_t x, size_t seed) const {
+            size_t operator()(uint16_t x, size_t seed) const noexcept {
                 return dynamic::detail::ChosenMixSeedHash64(x, seed);
             }
         };
 
         template<>
         struct MixSeedHash<int16_t> {
-            size_t operator()(int16_t x, size_t seed) const {
+            size_t operator()(int16_t x, size_t seed) const noexcept {
                 return dynamic::detail::ChosenMixSeedHash64(x, seed);
             }
         };
 
         template<class T>
         struct MixSeedHash<T*> {
-            size_t operator()(T* x, size_t seed) const {
+            size_t operator()(T* x, size_t seed) const noexcept {
                 return dynamic::detail::ChosenMixSeedHash64(reinterpret_cast<size_t>(x), seed);
             }
         };
 
         template<class CharT>
         struct MixSeedHash<std::basic_string<CharT>> {
-            size_t operator()(const std::basic_string<CharT> &str, size_t seed) const {
+            size_t operator()(const std::basic_string<CharT> &str, size_t seed) const noexcept {
                 return dynamic::detail::HashBytes(str.data(), sizeof(CharT) * str.length(), seed);
             }
         };
@@ -727,56 +745,56 @@ namespace fph {
 
         template<class T, typename = void>
         struct StrongSeedHash {
-            size_t operator()(const T& x, size_t seed) const {
+            size_t operator()(const T& x, size_t seed) const noexcept {
                 return dynamic::detail::ChosenStrongSeedHash64(x, seed);
             }
         };
 
         template<>
         struct StrongSeedHash<uint32_t> {
-            size_t operator()(uint32_t x, size_t seed) const {
+            size_t operator()(uint32_t x, size_t seed) const noexcept {
                 return dynamic::detail::ChosenStrongSeedHash64(x, seed);
             }
         };
 
         template<>
         struct StrongSeedHash<int32_t> {
-            size_t operator()(int32_t x, size_t seed) const {
+            size_t operator()(int32_t x, size_t seed) const noexcept {
                 return dynamic::detail::ChosenStrongSeedHash64(x, seed);
             }
         };
 
         template<>
         struct StrongSeedHash<uint16_t> {
-            size_t operator()(uint16_t x, size_t seed) const {
+            size_t operator()(uint16_t x, size_t seed) const noexcept {
                 return dynamic::detail::ChosenStrongSeedHash64(x, seed);
             }
         };
 
         template<>
         struct StrongSeedHash<int16_t> {
-            size_t operator()(int16_t x, size_t seed) const {
+            size_t operator()(int16_t x, size_t seed) const noexcept {
                 return dynamic::detail::ChosenStrongSeedHash64(x, seed);
             }
         };
 
         template<class T>
         struct StrongSeedHash<T*> {
-            size_t operator()(T* x, size_t seed) const {
+            size_t operator()(T* x, size_t seed) const noexcept {
                 return dynamic::detail::ChosenStrongSeedHash64(reinterpret_cast<size_t>(x), seed);
             }
         };
 
         template<class CharT>
         struct StrongSeedHash<std::basic_string<CharT>> {
-            size_t operator()(const std::basic_string<CharT> &str, size_t seed) const {
+            size_t operator()(const std::basic_string<CharT> &str, size_t seed) const noexcept {
                 return dynamic::detail::HashBytes(str.data(), sizeof(CharT) * str.length(), seed);
             }
         };
 
         template<class CharT>
         struct StrongSeedHash<std::basic_string_view<CharT>> {
-            size_t operator()(const std::basic_string_view<CharT> &str, size_t seed) const {
+            size_t operator()(const std::basic_string_view<CharT> &str, size_t seed) const noexcept {
                 return dynamic::detail::HashBytes(str.data(), sizeof(CharT) * str.length(), seed);
             }
         };
@@ -1317,9 +1335,11 @@ namespace fph {
                                 keys_first_part_ratio_(DEFAULT_KEYS_FIRST_PART_RATIO),
                                 buckets_first_part_ratio_(DEFAULT_BUCKETS_FIRST_PART_RATIO),
 #else
-                    bucket_mask_(0),
+//                    bucket_mask_(0),
+                    bucket_index_policy_{0},
 #endif
-                    item_num_mask_(bucket_count - 1U),
+//                    item_num_mask_(bucket_count - 1U),
+                    slot_index_policy_{bucket_count},
                     seed1_(0), seed2_(0),
                     bucket_p_array_{nullptr},
                     slot_(nullptr),
@@ -1334,7 +1354,8 @@ namespace fph {
                                                                       DEFAULT_MAX_LOAD_FACTOR, DEFAULT_BITS_PER_KEY, alloc
                 );
                 param_->item_num_ceil_ = dynamic::detail::Ceil2(std::max(bucket_count, size_type(4U)));
-                item_num_mask_ = param_->item_num_ceil_ - 1U;
+//                item_num_mask_ = param_->item_num_ceil_ - 1U;
+                slot_index_policy_ = IndexMapPolicy(param_->item_num_ceil_);
 
                 Build<false, true>(end(), end(), 0, false, DEFAULT_BITS_PER_KEY,
                                    DEFAULT_KEYS_FIRST_PART_RATIO,
@@ -1380,9 +1401,11 @@ namespace fph {
                 keys_first_part_ratio_(other.keys_first_part_ratio_),
                 buckets_first_part_ratio_(other.buckets_first_part_ratio_),
 #else
-                    bucket_mask_(other.bucket_mask_),
+//                    bucket_mask_(other.bucket_mask_),
+                    bucket_index_policy_(other.bucket_index_policy_),
 #endif
-                    item_num_mask_(other.item_num_mask_),
+//                    item_num_mask_(other.item_num_mask_),
+                    slot_index_policy_(other.slot_index_policy_),
                     seed1_(other.seed1_),
                     seed2_(other.seed2_),
                     bucket_p_array_(nullptr),
@@ -1451,9 +1474,11 @@ namespace fph {
                 buckets_first_part_ratio_(std::exchange(other.buckets_first_part_ratio_,DEFAULT_BUCKETS_FIRST_PART_RATIO)),
 
 #else
-                    bucket_mask_(std::exchange(other.bucket_mask_, 0)),
+//                    bucket_mask_(std::exchange(other.bucket_mask_, 0)),
+                    bucket_index_policy_(std::move(other.bucket_index_policy_)),
 #endif
-                    item_num_mask_(std::exchange(other.item_num_mask_, 0)),
+//                    item_num_mask_(std::exchange(other.item_num_mask_, 0)),
+                    slot_index_policy_(std::move(other.slot_index_policy_)),
                     seed1_(std::exchange(other.seed1_, 0x123456797291071ULL)),
                     seed2_(std::exchange(other.seed2_, 0x832748923732847ULL)),
                     bucket_p_array_(std::exchange(other.bucket_p_array_, nullptr)),
@@ -1469,8 +1494,8 @@ namespace fph {
             }
 
             DynamicRawSet(DynamicRawSet&& other, const Allocator& alloc):
-                    item_num_mask_(std::exchange(other.item_num_mask_, 0)),
-
+//                    item_num_mask_(std::exchange(other.item_num_mask_, 0)),
+                    slot_index_policy_(std::move(other.slot_index_policy_)),
                     slot_(std::exchange(other.slot_, nullptr)),
                     param_(std::exchange(other.param_, nullptr)),
 
@@ -1483,7 +1508,8 @@ namespace fph {
                 buckets_first_part_ratio_(std::exchange(other.buckets_first_part_ratio_,DEFAULT_BUCKETS_FIRST_PART_RATIO)),
 
 #else
-                    bucket_mask_(std::exchange(other.bucket_mask_, 0)),
+//                    bucket_mask_(std::exchange(other.bucket_mask_, 0)),
+                    bucket_index_policy_(std::move(other.bucket_index_policy_)),
 #endif
 
                     seed1_(std::exchange(other.seed1_, 0x123456797291071ULL)),
@@ -1558,7 +1584,8 @@ namespace fph {
                 new_item_ceil_num = std::min(new_item_ceil_num, MAX_ITEM_NUM_CEIL_LIMIT);
                 new_item_ceil_num = std::max(new_item_ceil_num, DEFAULT_INIT_ITEM_NUM_CEIL);
                 if (new_item_ceil_num != param_->item_num_ceil_) {
-                    item_num_mask_ = new_item_ceil_num - 1;
+                    slot_index_policy_.UpdateBySlotNum(new_item_ceil_num);
+//                    item_num_mask_ = new_item_ceil_num - 1;
                     param_->temp_pair_buf_.resize(param_->item_num_ * sizeof(value_type));
                     value_type *temp_value_buf_start = reinterpret_cast<value_type*>(param_->temp_pair_buf_.data());
                     value_type *temp_value_buf = temp_value_buf_start;
@@ -1771,10 +1798,12 @@ namespace fph {
                 }
                 param_->item_num_ = 0;
                 if (param_->item_num_ceil_ > 0) {
-                    item_num_mask_ = param_->item_num_ceil_ - 1U;
+                    slot_index_policy_.UpdateBySlotNum(param_->item_num_ceil_);
+//                    item_num_mask_ = param_->item_num_ceil_ - 1U;
                 }
                 else {
-                    item_num_mask_ = 0;
+                    slot_index_policy_.UpdateBySlotNum(0);
+//                    item_num_mask_ = 0;
                 }
 #if FPH_ENABLE_ITERATOR
                 param_->begin_it_ = iterator(nullptr, nullptr);
@@ -1899,17 +1928,24 @@ namespace fph {
              * @param key
              * @return
              */
-            size_t GetSlotPos(const key_type &key) const FPH_FUNC_RESTRICT {
+            FPH_ALWAYS_INLINE size_t GetSlotPos(const key_type &key) const FPH_FUNC_RESTRICT {
                 size_t bucket_index = GetBucketIndex(key);
                 size_t bucket_param = bucket_p_array_[bucket_index];
                 auto temp_offset = bucket_param >> 1U;
                 auto optional_bit = bucket_param & size_t(0x1UL);
-                auto slot_pos = (hash_(key, seed2_ + optional_bit) + temp_offset) & item_num_mask_;
+                auto temp_hash_value = hash_(key, seed2_ + optional_bit);
+
+                auto reverse_offset = slot_index_policy_.ReverseMap(temp_offset);
+                auto slot_pos = slot_index_policy_.MapToIndex(temp_hash_value + reverse_offset);
+//                auto slot_pos = (temp_hash_value + temp_offset) & item_num_mask_;
                 return slot_pos;
             }
 
-            size_t GetSlotPos(const key_type &key, size_t offset, size_t optional_bit) const FPH_FUNC_RESTRICT {
-                auto slot_pos = (hash_(key, seed2_ + optional_bit) + offset) & item_num_mask_;
+            FPH_ALWAYS_INLINE size_t GetSlotPos(const key_type &key, size_t offset, size_t optional_bit) const FPH_FUNC_RESTRICT {
+                auto temp_hash_value = (hash_(key, seed2_ + optional_bit));
+                size_t reverse_offset = slot_index_policy_.ReverseMap(offset);
+                auto slot_pos = slot_index_policy_.MapToIndex(temp_hash_value + reverse_offset);
+//                auto slot_pos = (temp_hash_value + offset) & item_num_mask_;
                 return slot_pos;
             }
 
@@ -1965,11 +2001,14 @@ namespace fph {
             // p2_remain_ + p2 == bucket_num_
             size_t p1_, p2_, p2_plus_1_, p2_remain_; // direct
 #else
-            size_t bucket_mask_; // direct
+            using IndexMapPolicy = typename Policy::index_map_policy;
+            IndexMapPolicy bucket_index_policy_;
+//            size_t bucket_mask_; // direct
 #endif
 
             // item_num_mask_ is no less than item_num_ and is in the format of (1UL << n) - 1UL
-            size_t item_num_mask_; // direct
+//            size_t item_num_mask_; // direct
+            IndexMapPolicy slot_index_policy_;
 
             size_t seed1_, seed2_; // direct
 
@@ -2195,8 +2234,8 @@ namespace fph {
 
             void SwapImp(DynamicRawSet &o) noexcept {
                 using std::swap;
-
-                swap(item_num_mask_, o.item_num_mask_);
+                swap(slot_index_policy_, o.slot_index_policy_);
+//                swap(item_num_mask_, o.item_num_mask_);
                 swap(slot_, o.slot_);
                 swap(param_, o.param_);
 #if FPH_DY_DUAL_BUCKET_SET
@@ -2204,7 +2243,8 @@ namespace fph {
                 swap(p2_plus_1_, o.p2_plus_1_);
                 swap(p2_remain_, o.p2_remain_);
 #else
-                swap(bucket_mask_, o.bucket_mask_);
+//                swap(bucket_mask_, o.bucket_mask_);
+                swap(bucket_index_policy_, o.bucket_index_policy_);
 #endif
                 if (param_ != nullptr) {
                     param_->begin_it_.SetTable(this);
@@ -2218,14 +2258,15 @@ namespace fph {
 
             }
 
-            size_t GetBucketIndex(const key_type &key) const FPH_FUNC_RESTRICT {
+            FPH_ALWAYS_INLINE size_t GetBucketIndex(const key_type &key) const FPH_FUNC_RESTRICT {
                 size_t temp_hash1 = hash_(key, seed1_);
 
 #if FPH_DY_DUAL_BUCKET_SET
                 size_t temp_value = temp_hash1 & item_num_mask_;
                 size_t ret = temp_value < p1_ ? (temp_hash1 & p2_) : p2_plus_1_ + (temp_hash1 & p2_remain_);
 #else
-                size_t ret = temp_hash1 & bucket_mask_;
+//                size_t ret = temp_hash1 & bucket_mask_;
+                size_t ret = bucket_index_policy_.MapToIndex(temp_hash1);
 #endif
                 return ret;
             }
@@ -2267,7 +2308,11 @@ namespace fph {
 
                 size_t new_pos = now_pos;
                 for (size_t slot_dis = 1; slot_dis < param_->item_num_ceil_; ++slot_dis) {
-                    new_pos = (++new_pos) & item_num_mask_;
+//                    new_pos = (++new_pos) & item_num_mask_;
+                    ++new_pos;
+                    if FPH_UNLIKELY(new_pos >= param_->item_num_ceil_) {
+                        new_pos = 0;
+                    }
                     if (!IsSlotEmpty(new_pos)) {
                         return new_pos;
                     }
@@ -2305,7 +2350,8 @@ namespace fph {
                 assert(tested_hash_vec.empty());
                 for (const key_type *key_ptr: testing_bucket.key_array) {
                     // TODO: test whether test optional bit will accelerate the construction
-                    auto temp_hash_value = hash_(*key_ptr, seed) & item_num_mask_;
+//                    auto temp_hash_value = hash_(*key_ptr, seed) & item_num_mask_;
+                    auto temp_hash_value = slot_index_policy_.MapToIndex(hash_(*key_ptr, seed));
                     if FPH_UNLIKELY(seed2_test_table[temp_hash_value]) {
                         test_pass_flag = false;
                         break;
@@ -2336,12 +2382,13 @@ namespace fph {
                 tested_hash_vec.clear();
                 bool test_pass_flag = true;
                 for (auto temp_hash: hash_vec) {
-                    if FPH_UNLIKELY(seed2_test_table[temp_hash]) {
+                    auto temp_pos = slot_index_policy_.MapToIndex(temp_hash);
+                    if FPH_UNLIKELY(seed2_test_table[temp_pos]) {
                         test_pass_flag = false;
                         break;
                     }
-                    seed2_test_table[temp_hash] = true;
-                    tested_hash_vec.push_back(temp_hash);
+                    seed2_test_table[temp_pos] = true;
+                    tested_hash_vec.push_back(temp_pos);
                 }
                 for (auto hash_value: tested_hash_vec) {
                     seed2_test_table[hash_value] = false;
@@ -2631,7 +2678,8 @@ namespace fph {
                             bucket_pattern.clear();
 
                             for (const auto *key_ptr: temp_bucket.key_array) {
-                                size_t temp_hash = hash_(*key_ptr, try_seed) & item_num_mask_;
+                                size_t temp_hash = hash_(*key_ptr, try_seed);
+//                                size_t temp_hash = hash_(*key_ptr, try_seed) & item_num_mask_;
                                 bucket_pattern.push_back(temp_hash);
                             }
 
@@ -2643,8 +2691,9 @@ namespace fph {
                                 }
                                 for (size_t i = 0; i < total_pattern_num - 1U; ++i) {
                                     auto original_hash = bucket_pattern[i];
-                                    auto temp_pos =
-                                            (original_hash + bucket_offset) & item_num_mask_;
+                                    auto temp_pos = slot_index_policy_.MapToIndex(original_hash + slot_index_policy_.ReverseMap(bucket_offset));
+//                                    auto temp_pos =
+//                                            (original_hash + bucket_offset) & item_num_mask_;
                                     auto y_pos = param_->map_table_[temp_pos];
                                     assert(y_pos < param_->filled_count_);
                                     std::swap(param_->random_table_[param_->filled_count_ - 1],
@@ -2665,16 +2714,22 @@ namespace fph {
                                 continue;
                             }
 
+                            size_t item_num_mask = param_->item_num_ceil_ - size_t(1ULL);
 
                             for (size_t search_pos_begin = param_->filled_count_;
                                  search_pos_begin < param_->item_num_ceil_; ++search_pos_begin) {
-                                size_t temp_offset =
-                                        (param_->item_num_ceil_ + param_->random_table_[search_pos_begin]
-                                         - bucket_pattern[0]) & item_num_mask_;
+//                                size_t temp_offset =
+//                                        (param_->item_num_ceil_ + param_->random_table_[search_pos_begin]
+//                                         - bucket_pattern[0]) & item_num_mask_;
+                                size_t temp_offset = (param_->item_num_ceil_ + param_->random_table_[search_pos_begin]
+                                                      - slot_index_policy_.MapToIndex(bucket_pattern[0])) & item_num_mask;
+
                                 bool this_offset_passed_flag = true;
                                 for (auto temp_hash_value: bucket_pattern) {
-                                    auto temp_pos =
-                                            (temp_hash_value + temp_offset) & item_num_mask_;
+                                    auto temp_pos = slot_index_policy_.MapToIndex(temp_hash_value +
+                                                                                  slot_index_policy_.ReverseMap(temp_offset));
+//                                    auto temp_pos =
+//                                            (temp_hash_value + temp_offset) & item_num_mask_;
                                     if (param_->map_table_[temp_pos] < param_->filled_count_) {
                                         this_offset_passed_flag = false;
                                         break;
@@ -2683,8 +2738,10 @@ namespace fph {
                                 if (this_offset_passed_flag) {
                                     pattern_matched_flag = true;
                                     for (auto temp_hash_value: bucket_pattern) {
-                                        auto temp_pos =
-                                                (temp_hash_value + temp_offset) & item_num_mask_;
+                                        auto temp_pos = slot_index_policy_.MapToIndex(temp_hash_value +
+                                                                                      slot_index_policy_.ReverseMap(temp_offset));
+//                                        auto temp_pos =
+//                                                (temp_hash_value + temp_offset) & item_num_mask_;
                                         auto y_pos = param_->map_table_[temp_pos];
                                         std::swap(param_->random_table_[param_->filled_count_],
                                                   param_->random_table_[y_pos]);
@@ -2983,19 +3040,27 @@ namespace fph {
                 param_->item_num_ = key_num;
 
                 if (key_num != 0) {
+//                    size_t temp_slot_num = size_t((double)key_num / MAX_LOAD_FACTOR_UPPER_LIMIT);
                     if (!is_rehash) {
-                        item_num_mask_ = dynamic::detail::CeilToMask(size_t(key_num / MAX_LOAD_FACTOR_UPPER_LIMIT));
+                        slot_index_policy_.UpdateBySlotNum(size_t((double)key_num / MAX_LOAD_FACTOR_UPPER_LIMIT));
+//                        item_num_mask_ = dynamic::detail::CeilToMask(size_t(key_num / MAX_LOAD_FACTOR_UPPER_LIMIT));
                     } else {
                         // item_num_mask_ should be set before call Build()
                     }
-                    item_num_mask_ = std::max(item_num_mask_, DEFAULT_INIT_ITEM_NUM_MASK);
-                    item_num_mask_ = std::min(item_num_mask_, size_t(BUCKET_PARAM_MASK));
+                    size_t temp_slot_num = slot_index_policy_.slot_num();
+                    temp_slot_num = std::max(temp_slot_num, DEFAULT_INIT_ITEM_NUM_CEIL);
+                    temp_slot_num = std::min(temp_slot_num, MAX_ITEM_NUM_CEIL_LIMIT);
+                    slot_index_policy_.UpdateBySlotNum(temp_slot_num);
+//                    item_num_mask_ = std::max(item_num_mask_, DEFAULT_INIT_ITEM_NUM_MASK);
+//                    item_num_mask_ = std::min(item_num_mask_, size_t(BUCKET_PARAM_MASK));
                 } else {
                     if (!is_rehash) {
-                        item_num_mask_ = DEFAULT_INIT_ITEM_NUM_MASK;
+                        slot_index_policy_.UpdateBySlotNum(DEFAULT_INIT_ITEM_NUM_CEIL);
+//                        item_num_mask_ = DEFAULT_INIT_ITEM_NUM_MASK;
                     }
                 }
-                param_->item_num_ceil_ = item_num_mask_ + 1U;
+                param_->item_num_ceil_ = slot_index_policy_.slot_num();
+//                param_->item_num_ceil_ = item_num_mask_ + 1U;
 
                 param_->should_expand_item_num_ = std::ceil(param_->item_num_ceil_ * param_->max_load_factor_);
 
@@ -3043,7 +3108,8 @@ namespace fph {
                 if (param_->bucket_num_ <= 1UL) {
                     param_->bucket_num_ = 2U;
                 }
-                bucket_mask_ = param_->bucket_num_ - 1U;
+//                bucket_mask_ = param_->bucket_num_ - 1U;
+                bucket_index_policy_.UpdateBySlotNum(param_->bucket_num_);
 #endif
 
                 param_->bucket_capacity_ = std::max(param_->bucket_num_, param_->bucket_capacity_);
@@ -3080,7 +3146,14 @@ namespace fph {
 
                 for (size_t try_seed1_time = 0; try_seed1_time < max_try_seed1_time; ++try_seed1_time) {
 
+#if !defined(NDEBUG) && FPH_DEBUG_FLAG
+                    if (try_seed1_time >= max_try_seed1_time / 2) {
+                        (void)0;
+                    }
+#endif
+
                     seed1_ = random_dis(random_engine);
+                    seed1_ |= 1ULL;
 
                     // ordering
 
@@ -3134,6 +3207,7 @@ namespace fph {
                         bool found_useful_seed2 = false;
                         for (size_t seed_time = 0; seed_time < max_reseed2_time; ++seed_time) {
                             seed2_ = random_dis(random_engine);
+                            seed2_ |= 1ULL;
 
                             bool pass_test_flag = true;
                             for (size_t i = 0; i < param_->bucket_num_; ++i) {
@@ -3165,7 +3239,7 @@ namespace fph {
                             param_->map_table_[param_->random_table_[i]] = i;
                         }
 
-                        assert(IsRandomTableValid(param_->random_table_, param_->map_table_));
+//                        assert(IsRandomTableValid(param_->random_table_, param_->map_table_));
                         param_->filled_count_ = 0;
 
                         std::vector<size_t, SizeTAllocator> bucket_pattern;
@@ -3188,7 +3262,8 @@ namespace fph {
                                 bucket_pattern.clear();
 
                                 for (const auto *key_ptr: temp_bucket.key_array) {
-                                    size_t temp_hash = hash_(*key_ptr, try_seed) & item_num_mask_;
+                                    size_t temp_hash = hash_(*key_ptr, try_seed);
+//                                    size_t temp_hash = hash_(*key_ptr, try_seed) & item_num_mask_;
                                     bucket_pattern.push_back(temp_hash);
                                 }
 
@@ -3204,16 +3279,20 @@ namespace fph {
                                     }
                                 }
 
+                                size_t item_num_mask = slot_index_policy_.slot_num() - size_t(1ULL);
 
                                 for (size_t search_pos_begin = param_->filled_count_;
                                      search_pos_begin < param_->item_num_ceil_; ++search_pos_begin) {
-                                    size_t temp_offset =
-                                            (param_->item_num_ceil_ + param_->random_table_[search_pos_begin]
-                                             - bucket_pattern[0]) & item_num_mask_;
+//                                    size_t temp_offset =
+//                                            (param_->item_num_ceil_ + param_->random_table_[search_pos_begin]
+//                                             - bucket_pattern[0]) & item_num_mask_;
+                                    size_t temp_offset = (param_->item_num_ceil_ + param_->random_table_[search_pos_begin]
+                                                          - slot_index_policy_.MapToIndex(bucket_pattern[0]) ) & item_num_mask;
                                     bool this_offset_passed_flag = true;
                                     for (auto temp_hash_value: bucket_pattern) {
-                                        auto temp_pos =
-                                                (temp_hash_value + temp_offset) & item_num_mask_;
+                                        auto temp_pos = slot_index_policy_.MapToIndex(temp_hash_value + slot_index_policy_.ReverseMap(temp_offset));
+//                                        auto temp_pos =
+//                                                (temp_hash_value + temp_offset) & item_num_mask_;
                                         if (param_->map_table_[temp_pos] < param_->filled_count_) {
                                             this_offset_passed_flag = false;
                                             break;
@@ -3222,9 +3301,9 @@ namespace fph {
                                     if (this_offset_passed_flag) {
                                         pattern_matched_flag = true;
                                         for (auto temp_hash_value: bucket_pattern) {
-                                            auto temp_pos =
-                                                    (temp_hash_value + temp_offset) &
-                                                    item_num_mask_;
+                                            auto temp_pos = slot_index_policy_.MapToIndex(temp_hash_value + slot_index_policy_.ReverseMap(temp_offset));
+//                                            auto temp_pos =
+//                                                    (temp_hash_value + temp_offset) & item_num_mask_;
                                             auto y_pos = param_->map_table_[temp_pos];
                                             std::swap(param_->random_table_[param_->filled_count_],
                                                       param_->random_table_[y_pos]);
@@ -3483,12 +3562,74 @@ namespace fph {
 
         };
 
+        class HighBitsIndexMapPolicy {
+        public:
+
+            HighBitsIndexMapPolicy(size_t element_num) noexcept: shift_bits_(0) {
+                UpdateBySlotNum(element_num);
+            }
+
+            // takes the high bits
+            FPH_ALWAYS_INLINE size_t MapToIndex(size_t hash) const noexcept {
+                return hash >> shift_bits_;
+
+//                return (11400714819323198485llu * hash) >> shift_bits_;
+            }
+
+            FPH_ALWAYS_INLINE size_t ReverseMap(size_t index) const noexcept {
+                return index << shift_bits_;
+            }
+
+            size_t slot_num() const noexcept {
+                return size_t(1UL) << (std::numeric_limits<size_t>::digits - shift_bits_);
+            }
+
+            void UpdateBySlotNum(size_t element_num) {
+                size_t round_up_log2_slot_num = dynamic::detail::RoundUpLog2(element_num);
+                shift_bits_ = std::numeric_limits<size_t>::digits - round_up_log2_slot_num;
+            }
+
+        protected:
+            uint32_t shift_bits_;
+        };
+
+        // using low bits of hash as slot index
+        class LowBitsIndexMapPolicy {
+        public:
+
+            LowBitsIndexMapPolicy(size_t element_num) noexcept: mask_(0) {
+                UpdateBySlotNum(element_num);
+            }
+
+            // takes the low bits
+            FPH_ALWAYS_INLINE size_t MapToIndex(size_t hash) const noexcept {
+                return hash & mask_;
+            }
+
+            FPH_ALWAYS_INLINE size_t ReverseMap(size_t index) const noexcept {
+                return index;
+            }
+
+            size_t slot_num() const noexcept {
+                return mask_ + size_t(1UL);
+            }
+
+            void UpdateBySlotNum(size_t element_num) {
+                mask_ = dynamic::detail::GenBitMask<size_t>(dynamic::detail::RoundUpLog2(element_num));
+            }
+
+        protected:
+            size_t mask_;
+        };
+
         template<class T>
         class DynamicFphSetPolicy {
         public:
             using key_type = T;
             using value_type = T;
             using slot_type = DynamicSetSlotType<T>;
+            using index_map_policy = HighBitsIndexMapPolicy;
+//            using index_map_policy = LowBitsIndexMapPolicy;
         };
 
     } // namespace detail
@@ -3503,7 +3644,7 @@ namespace fph {
      * @tparam RandomKeyGenerator the operator() returns a random key
      */
     template<class Key,
-            class SeedHash = MixSeedHash<Key>,
+            class SeedHash = SimpleSeedHash<Key>,
             class KeyEqual = std::equal_to<Key>,
             class Allocator = std::allocator<Key>,
             class BucketParamType = uint32_t,
@@ -3608,6 +3749,8 @@ namespace fph {
             using key_type = K;
             using value_type = std::pair<const K, V>;
             using slot_type = DynamicMapSlotType<K, V>;
+//            using index_map_policy = LowBitsIndexMapPolicy;
+            using index_map_policy = HighBitsIndexMapPolicy;
         };
 
     } // namespace detail
@@ -3623,7 +3766,7 @@ namespace fph {
      * @tparam RandomKeyGenerator the operator() returns a random key
      */
     template <class Key, class T,
-            class SeedHash = MixSeedHash<Key>,
+            class SeedHash = SimpleSeedHash<Key>,
             class KeyEqual = std::equal_to<Key>,
             class Allocator = std::allocator<std::pair<const Key, T>>,
             class BucketParamType = uint32_t,
