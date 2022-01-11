@@ -307,12 +307,12 @@ namespace fph {
 #endif
 
         template <typename T, typename U>
-        T RotateR (T v, U b)
+        constexpr T RotateR (T v, U b)
         {
             static_assert(std::is_integral<T>::value, "rotate of non-integral type");
             static_assert(! std::is_signed<T>::value, "rotate of signed type");
             static_assert(std::is_integral<U>::value, "rotate of non-integral type");
-            constexpr static unsigned int num_bits {std::numeric_limits<T>::digits};
+            constexpr unsigned int num_bits {std::numeric_limits<T>::digits};
             static_assert(0 == (num_bits & (num_bits - 1)), "rotate value bit length not power of two");
             constexpr unsigned int count_mask {num_bits - 1};
             // to make sure mb < num_bits
@@ -505,7 +505,7 @@ namespace fph {
             return key;
         }
 
-        FPH_ALWAYS_INLINE size_t RotMulSeedHash64(uint64_t key, uint64_t seed) {
+        constexpr FPH_ALWAYS_INLINE size_t RotMulSeedHash64(uint64_t key, uint64_t seed) {
             key = RotateR(key * seed, 33U);
             return key;
         }
@@ -513,6 +513,10 @@ namespace fph {
         constexpr FPH_ALWAYS_INLINE uint64_t MulOnlyHash64(uint64_t key, uint64_t seed) {
             uint64_t ret = key * seed;
             return ret;
+        }
+
+        constexpr FPH_ALWAYS_INLINE uint64_t IdentitySeedHash64(uint64_t key, uint64_t /* seed */) {
+            return key;
         }
 
         FPH_ALWAYS_INLINE size_t RotMul3SeedHash64(uint64_t key, uint64_t seed) {
@@ -601,7 +605,8 @@ namespace fph {
 
         constexpr FPH_ALWAYS_INLINE size_t ChosenSimpleSeedHash64(uint64_t key, size_t seed) {
 //            return RotMulSeedHash64(key, seed);
-            return MulOnlyHash64(key, seed);
+//            return MulOnlyHash64(key, seed);
+            return IdentitySeedHash64(key, seed);
         }
 
         size_t ChosenMixSeedHash64(uint64_t key, size_t seed) {
@@ -1340,6 +1345,7 @@ namespace fph {
 #endif
 //                    item_num_mask_(bucket_count - 1U),
                     slot_index_policy_{bucket_count},
+                    seed0_(0),
                     seed1_(0), seed2_(0),
                     bucket_p_array_{nullptr},
                     slot_(nullptr),
@@ -1406,6 +1412,7 @@ namespace fph {
 #endif
 //                    item_num_mask_(other.item_num_mask_),
                     slot_index_policy_(other.slot_index_policy_),
+                    seed0_(other.seed0_),
                     seed1_(other.seed1_),
                     seed2_(other.seed2_),
                     bucket_p_array_(nullptr),
@@ -1479,6 +1486,7 @@ namespace fph {
 #endif
 //                    item_num_mask_(std::exchange(other.item_num_mask_, 0)),
                     slot_index_policy_(std::move(other.slot_index_policy_)),
+                    seed0_(std::exchange(other.seed0_, 0x3284723912901723ULL)),
                     seed1_(std::exchange(other.seed1_, 0x123456797291071ULL)),
                     seed2_(std::exchange(other.seed2_, 0x832748923732847ULL)),
                     bucket_p_array_(std::exchange(other.bucket_p_array_, nullptr)),
@@ -1511,7 +1519,7 @@ namespace fph {
 //                    bucket_mask_(std::exchange(other.bucket_mask_, 0)),
                     bucket_index_policy_(std::move(other.bucket_index_policy_)),
 #endif
-
+                    seed0_(std::exchange(other.seed0_, 0x3284723912901723ULL)),
                     seed1_(std::exchange(other.seed1_, 0x123456797291071ULL)),
                     seed2_(std::exchange(other.seed2_, 0x832748923732847ULL)),
 
@@ -1569,9 +1577,13 @@ namespace fph {
                        bool verbose = false, double c = DEFAULT_BITS_PER_KEY,
                        double keys_first_part_ratio = DEFAULT_KEYS_FIRST_PART_RATIO, double buckets_first_part_ratio = DEFAULT_BUCKETS_FIRST_PART_RATIO,
                        size_t max_try_seed2_time = 1000, size_t max_reseed2_time = 1000) {
+                constexpr size_t max_try_seed0_time = 20;
                 constexpr size_t max_try_seed1_time = 100;
-                BuildImp<is_rehash, use_move, last_element_only_has_key>(pair_begin, pair_end, seed, verbose, c, keys_first_part_ratio,
-                                                                         buckets_first_part_ratio, max_try_seed1_time, max_try_seed2_time, max_reseed2_time);
+                BuildImp<is_rehash, use_move, last_element_only_has_key>(pair_begin, pair_end, seed,
+                                                                         verbose, c, keys_first_part_ratio,
+                                                                         buckets_first_part_ratio,
+                                                                         max_try_seed0_time,
+                                                                         max_try_seed1_time, max_try_seed2_time, max_reseed2_time);
             }
 
             void rehash(size_type count) {
@@ -1739,19 +1751,19 @@ namespace fph {
                 return end();
             }
 
-            iterator find(const key_type &key) noexcept {
+            FPH_ALWAYS_INLINE iterator find(const key_type& FPH_RESTRICT key) FPH_FUNC_RESTRICT noexcept {
                 auto slot_pos = GetSlotPos(key);
                 slot_type *pair_address = slot_ + slot_pos;
-                if (key_equal_(pair_address->key, key)) {
+                if FPH_LIKELY(key_equal_(pair_address->key, key)) {
                     return iterator(pair_address, this);
                 }
                 return end();
             }
 
-            const_iterator find(const key_type &key) const noexcept {
+            FPH_ALWAYS_INLINE const_iterator find(const key_type& FPH_RESTRICT key) const FPH_FUNC_RESTRICT noexcept {
                 auto slot_pos = GetSlotPos(key);
                 slot_type *pair_address = slot_ + slot_pos;
-                if (key_equal_(pair_address->key, key)) {
+                if FPH_LIKELY(key_equal_(pair_address->key, key)) {
                     return iterator(pair_address, this);
                 }
                 return end();
@@ -1827,7 +1839,7 @@ namespace fph {
                                                                      std::addressof(slot_[default_key_slot_index].key));
                         std::allocator_traits<KeyAllocator>::construct(key_alloc,
                                                                        std::addressof(slot_[default_key_slot_index].key), *param_->second_default_key_);
-                        param_->default_fill_key_bucket_index_ = GetBucketIndex(*param_->default_fill_key_);
+                        param_->default_fill_key_bucket_index_ = CompleteGetBucketIndex(*param_->default_fill_key_);
                         param_->default_fill_key_address_ = slot_ + default_key_slot_index;
                     }
                 }
@@ -1912,12 +1924,14 @@ namespace fph {
              * @param key
              * @return
              */
-            pointer GetPointerNoCheck(const key_type &key) noexcept {
+            FPH_ALWAYS_INLINE pointer GetPointerNoCheck(const key_type& FPH_RESTRICT key)
+            FPH_FUNC_RESTRICT noexcept {
                 size_t pos = GetSlotPos(key);
                 return std::addressof(slot_[pos].value);
             }
 
-            const_pointer GetPointerNoCheck(const key_type &key) const noexcept {
+            FPH_ALWAYS_INLINE const_pointer GetPointerNoCheck(const key_type& FPH_RESTRICT key)
+            const FPH_FUNC_RESTRICT noexcept {
                 size_t pos = GetSlotPos(key);
                 return std::addressof(slot_[pos].value);
             }
@@ -1928,12 +1942,16 @@ namespace fph {
              * @param key
              * @return
              */
-            FPH_ALWAYS_INLINE size_t GetSlotPos(const key_type &key) const FPH_FUNC_RESTRICT {
-                size_t bucket_index = GetBucketIndex(key);
+            FPH_ALWAYS_INLINE size_t GetSlotPos(const key_type &key) const FPH_FUNC_RESTRICT noexcept {
+                auto k_seed0_hash = hash_(key, seed0_);
+                size_t bucket_index = GetBucketIndex(k_seed0_hash);
                 size_t bucket_param = bucket_p_array_[bucket_index];
                 auto temp_offset = bucket_param >> 1U;
                 auto optional_bit = bucket_param & size_t(0x1UL);
-                auto temp_hash_value = hash_(key, seed2_ + optional_bit);
+
+
+                auto temp_hash_value = MidHash(k_seed0_hash, seed2_ + optional_bit);
+//                auto temp_hash_value = hash_(key, seed2_ + optional_bit);
 
                 auto reverse_offset = slot_index_policy_.ReverseMap(temp_offset);
                 auto slot_pos = slot_index_policy_.MapToIndex(temp_hash_value + reverse_offset);
@@ -1941,8 +1959,28 @@ namespace fph {
                 return slot_pos;
             }
 
-            FPH_ALWAYS_INLINE size_t GetSlotPos(const key_type &key, size_t offset, size_t optional_bit) const FPH_FUNC_RESTRICT {
-                auto temp_hash_value = (hash_(key, seed2_ + optional_bit));
+            FPH_ALWAYS_INLINE size_t GetSlotPosBySeed0Hash(size_t k_seed0_hash) const FPH_FUNC_RESTRICT noexcept {
+//                auto k_seed0_hash = hash_(key, seed0_);
+                size_t bucket_index = GetBucketIndex(k_seed0_hash);
+                size_t bucket_param = bucket_p_array_[bucket_index];
+                auto temp_offset = bucket_param >> 1U;
+                auto optional_bit = bucket_param & size_t(0x1UL);
+
+
+                auto temp_hash_value = MidHash(k_seed0_hash, seed2_ + optional_bit);
+//                auto temp_hash_value = hash_(key, seed2_ + optional_bit);
+
+                auto reverse_offset = slot_index_policy_.ReverseMap(temp_offset);
+                auto slot_pos = slot_index_policy_.MapToIndex(temp_hash_value + reverse_offset);
+//                auto slot_pos = (temp_hash_value + temp_offset) & item_num_mask_;
+                return slot_pos;
+            }
+
+            FPH_ALWAYS_INLINE size_t GetSlotPos(const key_type &key, size_t offset, size_t optional_bit)
+            const FPH_FUNC_RESTRICT noexcept {
+                auto k_seed0_hash = hash_(key, seed0_);
+                auto temp_hash_value = MidHash(k_seed0_hash, seed2_ + optional_bit);
+                //  auto temp_hash_value = (hash_(key, seed2_ + optional_bit));
                 size_t reverse_offset = slot_index_policy_.ReverseMap(offset);
                 auto slot_pos = slot_index_policy_.MapToIndex(temp_hash_value + reverse_offset);
 //                auto slot_pos = (temp_hash_value + offset) & item_num_mask_;
@@ -2010,6 +2048,7 @@ namespace fph {
 //            size_t item_num_mask_; // direct
             IndexMapPolicy slot_index_policy_;
 
+            size_t seed0_;
             size_t seed1_, seed2_; // direct
 
             using BucketParamAllocator = typename std::allocator_traits<Allocator>::template rebind_alloc<BucketParamType>;
@@ -2252,15 +2291,30 @@ namespace fph {
                 if (o.param_ != nullptr) {
                     o.param_->begin_it_.SetTable(std::addressof(o));
                 }
+                swap(seed0_, o.seed0_);
                 swap(seed1_, o.seed1_);
                 swap(seed2_, o.seed2_);
                 swap(bucket_p_array_, o.bucket_p_array_);
 
             }
 
-            FPH_ALWAYS_INLINE size_t GetBucketIndex(const key_type &key) const FPH_FUNC_RESTRICT {
-                size_t temp_hash1 = hash_(key, seed1_);
+            FPH_ALWAYS_INLINE size_t GetBucketIndex(size_t k_seed0_hash) const FPH_FUNC_RESTRICT noexcept {
+//                size_t temp_hash1 = hash_(key, seed1_);
+                size_t temp_hash1 = MidHash(k_seed0_hash, seed1_);
+#if FPH_DY_DUAL_BUCKET_SET
+                size_t temp_value = temp_hash1 & item_num_mask_;
+                size_t ret = temp_value < p1_ ? (temp_hash1 & p2_) : p2_plus_1_ + (temp_hash1 & p2_remain_);
+#else
+//                size_t ret = temp_hash1 & bucket_mask_;
+                size_t ret = bucket_index_policy_.MapToIndex(temp_hash1);
+#endif
+                return ret;
+            }
 
+            FPH_ALWAYS_INLINE size_t CompleteGetBucketIndex(const key_type& FPH_RESTRICT key) const FPH_FUNC_RESTRICT noexcept {
+//                size_t temp_hash1 = hash_(key, seed1_);
+                auto k_seed0_hash = hash_(key, seed0_);
+                size_t temp_hash1 = MidHash(k_seed0_hash, seed1_);
 #if FPH_DY_DUAL_BUCKET_SET
                 size_t temp_value = temp_hash1 & item_num_mask_;
                 size_t ret = temp_value < p1_ ? (temp_hash1 & p2_) : p2_plus_1_ + (temp_hash1 & p2_remain_);
@@ -2321,6 +2375,19 @@ namespace fph {
 
             }
 
+            static FPH_ALWAYS_INLINE size_t MixValue(size_t hash_value, size_t seed) {
+                return hash_value * seed;
+            }
+
+            static FPH_ALWAYS_INLINE size_t MidHash(size_t hash_k_seed0, size_t seed) {
+                return MixValue(hash_k_seed0, seed);
+            }
+
+            FPH_ALWAYS_INLINE size_t CompleteHash(const key_type& FPH_RESTRICT key, size_t seed) const FPH_FUNC_RESTRICT noexcept {
+                auto hash_k_seed0 = hash_(key, seed0_);
+                return MixValue(hash_k_seed0, seed);
+            }
+
 #if FPH_ENABLE_ITERATOR
 
             // change begin()
@@ -2351,7 +2418,8 @@ namespace fph {
                 for (const key_type *key_ptr: testing_bucket.key_array) {
                     // TODO: test whether test optional bit will accelerate the construction
 //                    auto temp_hash_value = hash_(*key_ptr, seed) & item_num_mask_;
-                    auto temp_hash_value = slot_index_policy_.MapToIndex(hash_(*key_ptr, seed));
+                    auto temp_hash_value = slot_index_policy_.MapToIndex(CompleteHash(*key_ptr, seed));
+//                    auto temp_hash_value = slot_index_policy_.MapToIndex(hash_(*key_ptr, seed));
                     if FPH_UNLIKELY(seed2_test_table[temp_hash_value]) {
                         test_pass_flag = false;
                         break;
@@ -2529,7 +2597,7 @@ namespace fph {
 
             iterator EraseImp(const_iterator iter) {
                 auto *slot_ptr = iter.value_ptr();
-                size_t bucket_index = GetBucketIndex(slot_ptr->key);
+                size_t bucket_index = CompleteGetBucketIndex(slot_ptr->key);
                 auto &temp_bucket = param_->bucket_array_[bucket_index];
 #ifndef NDEBUG
                 bool find_key_flag = false;
@@ -2618,8 +2686,9 @@ namespace fph {
                                 MAX_ITEM_NUM_CEIL_LIMIT) {
                     rehash(param_->item_num_ceil_ + 1U);
                 }
-
-                auto possible_pos = GetSlotPos(key);
+                auto k_seed0_hash = hash_(key, seed0_);
+                auto possible_pos = GetSlotPosBySeed0Hash(k_seed0_hash);
+//                auto possible_pos = GetSlotPos(key);
                 auto *insert_address = slot_ + possible_pos;
                 bool insert_flag;
                 if (key_equal_(insert_address->key, key)) {
@@ -2637,7 +2706,8 @@ namespace fph {
                         std::swap(param_->map_table_[param_->random_table_[param_->filled_count_]],
                                   param_->map_table_[param_->random_table_[y_pos]]);
                         ++param_->filled_count_;
-                        auto bucket_index = GetBucketIndex(key);
+                        auto bucket_index = GetBucketIndex(k_seed0_hash);
+//                        auto bucket_index = GetBucketIndex(key);
                         auto &temp_bucket = param_->bucket_array_[bucket_index];
                         temp_bucket.key_array.push_back(&(insert_address->key));
                         ++temp_bucket.entry_cnt;
@@ -2654,8 +2724,8 @@ namespace fph {
                         assert(original_default_key_pos + slot_ == param_->default_fill_key_address_);
                         // 1 for empty, 0 for filled
                         int original_default_key_pos_empty_status = IsSlotEmpty(original_default_key_pos);
-
-                        size_t bucket_index = GetBucketIndex(key);
+                        auto bucket_index = GetBucketIndex(k_seed0_hash);
+//                        size_t bucket_index = GetBucketIndex(key);
                         size_t bucket_param = bucket_p_array_[bucket_index];
                         auto bucket_offset = bucket_param >> 1U;
                         auto optional_bit = bucket_param & size_t(0x1UL);
@@ -2678,7 +2748,8 @@ namespace fph {
                             bucket_pattern.clear();
 
                             for (const auto *key_ptr: temp_bucket.key_array) {
-                                size_t temp_hash = hash_(*key_ptr, try_seed);
+                                size_t temp_hash = CompleteHash(*key_ptr, try_seed);
+//                                size_t temp_hash = hash_(*key_ptr, try_seed);
 //                                size_t temp_hash = hash_(*key_ptr, try_seed) & item_num_mask_;
                                 bucket_pattern.push_back(temp_hash);
                             }
@@ -2988,6 +3059,7 @@ namespace fph {
             void BuildImp(InputIt pair_begin, InputIt pair_end, uint64_t seed = 0,
                           bool verbose = false, double c = 3.0,
                           double keys_first_part_ratio = 0.6, double buckets_first_part_ratio = 0.3,
+                          size_t max_try_seed0_time = 10,
                           size_t max_try_seed1_time = 10, size_t max_try_seed2_time = 1000,
                           size_t max_reseed2_time = 1000) {
 
@@ -3144,208 +3216,220 @@ namespace fph {
 
                 bool build_succeed_flag = false;
 
-                for (size_t try_seed1_time = 0; try_seed1_time < max_try_seed1_time; ++try_seed1_time) {
+                for (size_t try_seed0_time = 0; try_seed0_time < max_try_seed0_time; ++ try_seed0_time) {
+
+                    seed0_ = random_dis(random_engine);
+                    seed0_ |= size_t(1ULL);
+
+                    for (size_t try_seed1_time = 0; try_seed1_time < max_try_seed1_time; ++try_seed1_time) {
 
 #if !defined(NDEBUG) && FPH_DEBUG_FLAG
-                    if (try_seed1_time >= max_try_seed1_time / 2) {
-                        (void)0;
-                    }
+                        if (try_seed1_time >= max_try_seed1_time / 2) {
+                            (void)0;
+                        }
 #endif
 
-                    seed1_ = random_dis(random_engine);
-                    seed1_ |= 1ULL;
+                        seed1_ = random_dis(random_engine);
+                        seed1_ |= size_t(1ULL);
 
-                    // ordering
-
-
-                    size_t max_bucket_size = 0;
+                        // ordering
 
 
-                    param_->bucket_array_.resize(0);
-                    for (size_t i = 0; i < param_->bucket_num_; ++i) {
-                        param_->bucket_array_.emplace_back(i);
-                    }
-
-                    auto update_bucket_func = [&](const value_type &value) {
-                        const auto *slot_ptr = reinterpret_cast<const slot_type *>(&value);
-                        size_t hash_value = GetBucketIndex(slot_ptr->key);
-                        assert(hash_value < param_->bucket_num_);
-                        auto &temp_bucket = param_->bucket_array_[hash_value];
-                        ++temp_bucket.entry_cnt;
-                        max_bucket_size =
-                                temp_bucket.entry_cnt > max_bucket_size ? temp_bucket.entry_cnt
-                                                                        : max_bucket_size;
-                        temp_bucket.AddKey(&(slot_ptr->key));
-                    };
-
-                    for (auto it = pair_begin; it != pair_end; ++it) {
-                        update_bucket_func(*it);
-                    }
-
-                    std::vector<size_t, SizeTAllocator> sorted_index_array;
-                    sorted_index_array.resize(param_->bucket_num_);
-
-                    detail::CountSortOutIndex<BucketGetKey<BucketType>, true, SizeTAllocator>
-                                                                              (param_->bucket_array_.begin(), param_->bucket_array_.end(), sorted_index_array.begin(),
-                                                                                      max_bucket_size);
+                        size_t max_bucket_size = 0;
 
 
-                    // searching
+                        param_->bucket_array_.resize(0);
+                        for (size_t i = 0; i < param_->bucket_num_; ++i) {
+                            param_->bucket_array_.emplace_back(i);
+                        }
+
+                        auto update_bucket_func = [&](const value_type &value) {
+                            const auto *slot_ptr = reinterpret_cast<const slot_type *>(&value);
+//                            size_t hash_value = GetBucketIndex(slot_ptr->key);
+                            size_t hash_value = CompleteGetBucketIndex(slot_ptr->key);
+                            assert(hash_value < param_->bucket_num_);
+                            auto &temp_bucket = param_->bucket_array_[hash_value];
+                            ++temp_bucket.entry_cnt;
+                            max_bucket_size =
+                                    temp_bucket.entry_cnt > max_bucket_size ? temp_bucket.entry_cnt
+                                                                            : max_bucket_size;
+                            temp_bucket.AddKey(&(slot_ptr->key));
+                        };
+
+                        for (auto it = pair_begin; it != pair_end; ++it) {
+                            update_bucket_func(*it);
+                        }
+
+                        std::vector<size_t, SizeTAllocator> sorted_index_array;
+                        sorted_index_array.resize(param_->bucket_num_);
+
+                        detail::CountSortOutIndex<BucketGetKey<BucketType>, true, SizeTAllocator>
+                                                                                  (param_->bucket_array_.begin(), param_->bucket_array_.end(), sorted_index_array.begin(),
+                                                                                          max_bucket_size);
 
 
-                    // try to find seed2_ which makes no collision per bucket
-                    param_->seed2_test_table_.resize(param_->item_num_ceil_, false);
-                    param_->tested_hash_vec_.clear();
-
-                    param_->random_table_.resize(param_->item_num_ceil_);
-                    param_->map_table_.resize(param_->item_num_ceil_);
+                        // searching
 
 
+                        // try to find seed2_ which makes no collision per bucket
+                        param_->seed2_test_table_.resize(param_->item_num_ceil_, false);
+                        param_->tested_hash_vec_.clear();
 
-                    for (size_t try_seed2_time = 0; try_seed2_time < max_try_seed2_time; ++try_seed2_time) {
+                        param_->random_table_.resize(param_->item_num_ceil_);
+                        param_->map_table_.resize(param_->item_num_ceil_);
 
-                        bool found_useful_seed2 = false;
-                        for (size_t seed_time = 0; seed_time < max_reseed2_time; ++seed_time) {
-                            seed2_ = random_dis(random_engine);
-                            seed2_ |= 1ULL;
 
-                            bool pass_test_flag = true;
-                            for (size_t i = 0; i < param_->bucket_num_; ++i) {
-                                auto &testing_bucket = param_->bucket_array_[sorted_index_array[i]];
-                                pass_test_flag &= TestBucketSelfCollision(testing_bucket,
-                                                                          param_->seed2_test_table_,
-                                                                          param_->tested_hash_vec_, seed2_);
 
-                                if (!pass_test_flag) {
+                        for (size_t try_seed2_time = 0; try_seed2_time < max_try_seed2_time; ++try_seed2_time) {
+
+                            bool found_useful_seed2 = false;
+                            for (size_t seed_time = 0; seed_time < max_reseed2_time; ++seed_time) {
+                                seed2_ = random_dis(random_engine);
+                                seed2_ |= size_t(1ULL);
+
+                                bool pass_test_flag = true;
+                                for (size_t i = 0; i < param_->bucket_num_; ++i) {
+                                    auto &testing_bucket = param_->bucket_array_[sorted_index_array[i]];
+                                    pass_test_flag &= TestBucketSelfCollision(testing_bucket,
+                                                                              param_->seed2_test_table_,
+                                                                              param_->tested_hash_vec_, seed2_);
+
+                                    if (!pass_test_flag) {
+                                        break;
+                                    }
+                                }
+                                if (pass_test_flag) {
+                                    found_useful_seed2 = true;
                                     break;
                                 }
+
                             }
-                            if (pass_test_flag) {
-                                found_useful_seed2 = true;
-                                break;
-                            }
-
-                        }
-                        if (!found_useful_seed2) {
-                            continue;
-                        }
-
-
-                        for (size_t i = 0; i < param_->item_num_ceil_; ++i) {
-                            param_->random_table_[i] = i;
-                        }
-                        std::shuffle(param_->random_table_.begin(), param_->random_table_.end(), random_engine);
-                        for (size_t i = 0; i < param_->item_num_ceil_; ++i) {
-                            param_->map_table_[param_->random_table_[i]] = i;
-                        }
-
-//                        assert(IsRandomTableValid(param_->random_table_, param_->map_table_));
-                        param_->filled_count_ = 0;
-
-                        std::vector<size_t, SizeTAllocator> bucket_pattern;
-                        bucket_pattern.reserve(max_bucket_size);
-
-                        bool this_try_seed2_succeed_flag = true;
-
-                        for (size_t bucket_index = 0; bucket_index < param_->bucket_num_; ++bucket_index) {
-                            auto &temp_bucket = param_->bucket_array_[sorted_index_array[bucket_index]];
-                            if (temp_bucket.entry_cnt == 0) {
+                            if (!found_useful_seed2) {
                                 continue;
                             }
 
-                            bool pattern_matched_flag = false;
 
-                            for (size_t bucket_try_bit = 0; bucket_try_bit < 2; ++bucket_try_bit) {
+                            for (size_t i = 0; i < param_->item_num_ceil_; ++i) {
+                                param_->random_table_[i] = i;
+                            }
+                            std::shuffle(param_->random_table_.begin(), param_->random_table_.end(), random_engine);
+                            for (size_t i = 0; i < param_->item_num_ceil_; ++i) {
+                                param_->map_table_[param_->random_table_[i]] = i;
+                            }
 
-                                auto try_seed = seed2_ + bucket_try_bit;
+                            //                        assert(IsRandomTableValid(param_->random_table_, param_->map_table_));
+                            param_->filled_count_ = 0;
 
-                                bucket_pattern.clear();
+                            std::vector<size_t, SizeTAllocator> bucket_pattern;
+                            bucket_pattern.reserve(max_bucket_size);
 
-                                for (const auto *key_ptr: temp_bucket.key_array) {
-                                    size_t temp_hash = hash_(*key_ptr, try_seed);
-//                                    size_t temp_hash = hash_(*key_ptr, try_seed) & item_num_mask_;
-                                    bucket_pattern.push_back(temp_hash);
+                            bool this_try_seed2_succeed_flag = true;
+
+                            for (size_t bucket_index = 0; bucket_index < param_->bucket_num_; ++bucket_index) {
+                                auto &temp_bucket = param_->bucket_array_[sorted_index_array[bucket_index]];
+                                if (temp_bucket.entry_cnt == 0) {
+                                    continue;
                                 }
 
-                                // test collision in this bucket if try_bit == 1
+                                bool pattern_matched_flag = false;
 
-                                if (bucket_try_bit > 0) {
-                                    bool self_collision_flag = !TestHashVecSelfCollision(
-                                            bucket_pattern,
-                                            param_->seed2_test_table_,
-                                            param_->tested_hash_vec_);
-                                    if (self_collision_flag) {
-                                        break;
+                                for (size_t bucket_try_bit = 0; bucket_try_bit < 2; ++bucket_try_bit) {
+
+                                    auto try_seed = seed2_ + bucket_try_bit;
+
+                                    bucket_pattern.clear();
+
+                                    for (const auto *key_ptr: temp_bucket.key_array) {
+                                        size_t temp_hash = CompleteHash(*key_ptr, try_seed);
+//                                        size_t temp_hash = hash_(*key_ptr, try_seed);
+                                        //                                    size_t temp_hash = hash_(*key_ptr, try_seed) & item_num_mask_;
+                                        bucket_pattern.push_back(temp_hash);
                                     }
-                                }
 
-                                size_t item_num_mask = slot_index_policy_.slot_num() - size_t(1ULL);
+                                    // test collision in this bucket if try_bit == 1
 
-                                for (size_t search_pos_begin = param_->filled_count_;
-                                     search_pos_begin < param_->item_num_ceil_; ++search_pos_begin) {
-//                                    size_t temp_offset =
-//                                            (param_->item_num_ceil_ + param_->random_table_[search_pos_begin]
-//                                             - bucket_pattern[0]) & item_num_mask_;
-                                    size_t temp_offset = (param_->item_num_ceil_ + param_->random_table_[search_pos_begin]
-                                                          - slot_index_policy_.MapToIndex(bucket_pattern[0]) ) & item_num_mask;
-                                    bool this_offset_passed_flag = true;
-                                    for (auto temp_hash_value: bucket_pattern) {
-                                        auto temp_pos = slot_index_policy_.MapToIndex(temp_hash_value + slot_index_policy_.ReverseMap(temp_offset));
-//                                        auto temp_pos =
-//                                                (temp_hash_value + temp_offset) & item_num_mask_;
-                                        if (param_->map_table_[temp_pos] < param_->filled_count_) {
-                                            this_offset_passed_flag = false;
+                                    if (bucket_try_bit > 0) {
+                                        bool self_collision_flag = !TestHashVecSelfCollision(
+                                                bucket_pattern,
+                                                param_->seed2_test_table_,
+                                                param_->tested_hash_vec_);
+                                        if (self_collision_flag) {
                                             break;
                                         }
                                     }
-                                    if (this_offset_passed_flag) {
-                                        pattern_matched_flag = true;
+
+                                    size_t item_num_mask = slot_index_policy_.slot_num() - size_t(1ULL);
+
+                                    for (size_t search_pos_begin = param_->filled_count_;
+                                         search_pos_begin < param_->item_num_ceil_; ++search_pos_begin) {
+                                        //                                    size_t temp_offset =
+                                        //                                            (param_->item_num_ceil_ + param_->random_table_[search_pos_begin]
+                                        //                                             - bucket_pattern[0]) & item_num_mask_;
+                                        size_t temp_offset = (param_->item_num_ceil_ + param_->random_table_[search_pos_begin]
+                                                              - slot_index_policy_.MapToIndex(bucket_pattern[0]) ) & item_num_mask;
+                                        bool this_offset_passed_flag = true;
                                         for (auto temp_hash_value: bucket_pattern) {
                                             auto temp_pos = slot_index_policy_.MapToIndex(temp_hash_value + slot_index_policy_.ReverseMap(temp_offset));
-//                                            auto temp_pos =
-//                                                    (temp_hash_value + temp_offset) & item_num_mask_;
-                                            auto y_pos = param_->map_table_[temp_pos];
-                                            std::swap(param_->random_table_[param_->filled_count_],
-                                                      param_->random_table_[y_pos]);
-                                            std::swap(param_->map_table_[param_->random_table_[param_->filled_count_]],
-                                                      param_->map_table_[param_->random_table_[y_pos]]);
-                                            ++param_->filled_count_;
+                                            //                                        auto temp_pos =
+                                            //                                                (temp_hash_value + temp_offset) & item_num_mask_;
+                                            if (param_->map_table_[temp_pos] < param_->filled_count_) {
+                                                this_offset_passed_flag = false;
+                                                break;
+                                            }
                                         }
-                                        bucket_p_array_[temp_bucket.index] =
-                                                (temp_offset << 1U) | bucket_try_bit;
+                                        if (this_offset_passed_flag) {
+                                            pattern_matched_flag = true;
+                                            for (auto temp_hash_value: bucket_pattern) {
+                                                auto temp_pos = slot_index_policy_.MapToIndex(temp_hash_value + slot_index_policy_.ReverseMap(temp_offset));
+                                                //                                            auto temp_pos =
+                                                //                                                    (temp_hash_value + temp_offset) & item_num_mask_;
+                                                auto y_pos = param_->map_table_[temp_pos];
+                                                std::swap(param_->random_table_[param_->filled_count_],
+                                                          param_->random_table_[y_pos]);
+                                                std::swap(param_->map_table_[param_->random_table_[param_->filled_count_]],
+                                                          param_->map_table_[param_->random_table_[y_pos]]);
+                                                ++param_->filled_count_;
+                                            }
+                                            bucket_p_array_[temp_bucket.index] =
+                                                    (temp_offset << 1U) | bucket_try_bit;
 
+                                            break;
+                                        }
+                                    }
+
+                                    if (pattern_matched_flag) {
                                         break;
                                     }
-                                }
 
-                                if (pattern_matched_flag) {
+                                } // for bucket_try_bit
+
+                                if (!pattern_matched_flag) {
+                                    this_try_seed2_succeed_flag = false;
                                     break;
                                 }
 
-                            } // for bucket_try_bit
+                            } // for bucket_index
 
-                            if (!pattern_matched_flag) {
-                                this_try_seed2_succeed_flag = false;
+                            if (this_try_seed2_succeed_flag) {
+                                build_succeed_flag = true;
                                 break;
                             }
 
-                        } // for bucket_index
 
-                        if (this_try_seed2_succeed_flag) {
-                            build_succeed_flag = true;
+                        } // for try_seed2_time
+
+                        if (build_succeed_flag) {
                             break;
                         }
 
-
-                    } // for try_seed2_time
+                    } // for try_seed1_time
 
                     if (build_succeed_flag) {
                         break;
                     }
 
-                } // for try_seed1_time
 
-
+                } // for try_seed0_time
 
                 if (!build_succeed_flag) {
                     throw std::invalid_argument("timeout when try to build fph map, consider using a stronger seed hash function, key_num: "
@@ -3422,7 +3506,8 @@ namespace fph {
                             *param_->second_default_key_);
 
                     param_->default_fill_key_address_ = slot_ + default_key_slot_index;
-                    param_->default_fill_key_bucket_index_ = GetBucketIndex(default_key);
+                    param_->default_fill_key_bucket_index_ = CompleteGetBucketIndex(default_key);
+//                    param_->default_fill_key_bucket_index_ = GetBucketIndex(default_key);
                 }
 
 
@@ -3517,7 +3602,8 @@ namespace fph {
                 }
                 for (auto it = begin(); it != end(); ++it) {
                     const auto* slot_address = slot_type::GetSlotAddressByValueAddress(std::addressof(*it));
-                    auto bucket_index = this->GetBucketIndex(slot_address->key);
+                    auto bucket_index = CompleteGetBucketIndex(slot_address->key);
+//                    auto bucket_index = this->GetBucketIndex(slot_address->key);
                     auto &key_array = param_->bucket_array_[bucket_index].key_array;
                     key_array.push_back(&(slot_address->key));
                 }
