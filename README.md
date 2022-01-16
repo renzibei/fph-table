@@ -211,7 +211,7 @@ set a max_load_factor no larger than max_load_factor_upper_limit(), which should
 
 If the range of your keys are limited, and they won't change at some time of your program,
 you can set a large max_load_factor and then call rehash(element_size) to rehash the elements to
-smaller slots if the load_factor can be smaller in that case. (Make sure almost no new keys will
+smaller slots if the load_factor can be larger in that case. (Make sure almost no new keys will
 be added to the table after this because the insert operation will be very slow when the
 load_factor is very large.)
 
@@ -236,10 +236,13 @@ the integer interval of that type, then the hash value may probably not be unifo
 in the hash type interval as well for a weak hash function. But with a strong hash function,
 you can easily produce uniformly distributed hash values regardless of your input distribution.
 If the hash values of the input keys are not uniformly distributed, there may be a failure in the
-building of the hash table.
+building of the hash table. The default Seed Hash function is the `fph::SimpleSeedHash<T>` as it is
+the fastest, and it is good enough for most of the input data in real life. 
 
 Tips: Know the patterns of the input keys before choosing the seed hash function. If the keys may
-cause a failure in the building of the table, use a stronger seed hash function.
+cause a failure in the building of the table (which is rare for the hash functions we provide), 
+use a stronger seed hash function. Don't write you own seed hash function unless you know they 
+are good hash functions.
 
 If the user wants to write a custom seed hash function for the key type, refer to the
 fph::SimpleSeedHash<T>; the functor needs to take both a key and a seed (size_t) as input arguments and

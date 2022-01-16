@@ -28,7 +28,7 @@
  *
  * If the range of your keys are limited and they won't change at some time of your program,
  * you can set a large max_load_factor and then call rehash(element_size) to rehash the elements to
- * smaller slots if the load_factor can be smaller in that case. (Make sure almost no new keys will
+ * smaller slots if the load_factor can be larger in that case. (Make sure almost no new keys will
  * be added to the table after this because the insert operation will be very slow when the
  * load_factor is very large.)
  *
@@ -1219,9 +1219,23 @@ namespace fph {
 
             std::string operator()(size_t length) {
                 static constexpr char alphanum[] =
-                        "0123456789"
-                        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                        "abcdefghijklmnopqrstuvwxyz";
+                        "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!\"#$%&\'"
+                        "()*+,-./:;<=>?@[\\]^_`{|}~ "
+                        ;
+                std::string ret(length, 0);
+                for (size_t i = 0; i < length; ++i) {
+                    ret[i] = alphanum[random_gen(random_engine) % (sizeof(alphanum) - 1)];
+                }
+                static_assert(sizeof(alphanum) == 96);
+                return ret;
+            }
+
+            template<size_t length>
+            std::string RandomGenStr() {
+                static constexpr char alphanum[] =
+                        "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!\"#$%&\'"
+                        "()*+,-./:;<=>?@[\\]^_`{|}~ "
+                ;
                 std::string ret(length, 0);
                 for (size_t i = 0; i < length; ++i) {
                     ret[i] = alphanum[random_gen(random_engine) % (sizeof(alphanum) - 1)];
@@ -1230,13 +1244,21 @@ namespace fph {
             }
 
             /**
-             * random generate a string consists of alpha num with random length from [1, 10]
+             * random generate a string consists of alpha num with fixed (default 10) or random length (default max 10)
              * @return
              */
             std::string operator()() {
-                // TODO: change default size to bigger number if needed
-                size_t random_len = 1UL + random_gen(random_engine) % 10UL;
-                return (*this)(random_len);
+                // TODO: change default size to bigger number if needed,
+                // now use fix length, change it if you need random len
+                constexpr bool USE_FIX_LEN = true;
+                constexpr size_t DEFAULT_LENGTH = 10U;
+                if constexpr(USE_FIX_LEN) {
+                    return RandomGenStr<DEFAULT_LENGTH>();
+                }
+                else {
+                    size_t random_len = 1UL + random_gen(random_engine) % DEFAULT_LENGTH;
+                    return (*this)(random_len);
+                }
             }
 
             void seed(uint64_t seed = 0) {
