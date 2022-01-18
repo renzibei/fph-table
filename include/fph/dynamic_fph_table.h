@@ -467,25 +467,7 @@ namespace fph {
 
 
 
-//        static constexpr uint64_t K_MUL =
-//                sizeof(size_t) == 4 ? uint64_t{0xcc9e2d51}
-//                                    : uint64_t{0x9ddfea08eb382d69};
-//
-//        FPH_ALWAYS_INLINE constexpr size_t Ano3SeedHash64(uint64_t key, size_t seed) {
-//#if defined(__aarch64__)
-//            // On AArch64, calculating a 128-bit product is inefficient, because it
-//            // requires a sequence of two instructions to calculate the upper and lower
-//            // halves of the result.
-//            using MultType = uint64_t;
-//#else
-//            using MultType =
-//            std::conditional<sizeof(size_t) == 4, uint64_t, __uint128_t>::type;
-//#endif
-//            MultType m = key + 0xff51afd7ed558ccdULL;
-//            m *= seed;
-//            return static_cast<size_t>(m ^ (m >> (sizeof(m) * 8 / 2)));
-//        }
-
+        // from absl
         FPH_ALWAYS_INLINE constexpr size_t Ano3SeedHash16(uint16_t key, size_t seed) {
 #if defined(__aarch64__)
             // On AArch64, calculating a 128-bit product is inefficient, because it
@@ -1967,12 +1949,12 @@ namespace fph {
             FPH_ALWAYS_INLINE size_t GetSlotPos(const key_type &key) const FPH_FUNC_RESTRICT noexcept {
                 auto k_seed0_hash = hash_(key, seed0_);
                 size_t bucket_index = GetBucketIndex(k_seed0_hash);
-                size_t bucket_param = bucket_p_array_[bucket_index];
+                auto bucket_param = bucket_p_array_[bucket_index];
                 auto temp_offset = bucket_param >> 1U;
-                auto optional_bit = bucket_param & size_t(0x1UL);
+                auto optional_bit = bucket_param & 0x1U;
 
 
-                auto temp_hash_value = MidHash(k_seed0_hash, seed2_ + optional_bit);
+                auto temp_hash_value = MidHash(k_seed0_hash, MixSeedAndBit(seed2_, optional_bit));
 //                auto temp_hash_value = hash_(key, seed2_ + optional_bit);
 
                 auto reverse_offset = slot_index_policy_.ReverseMap(temp_offset);
@@ -1984,12 +1966,12 @@ namespace fph {
             FPH_ALWAYS_INLINE size_t GetSlotPosBySeed0Hash(size_t k_seed0_hash) const FPH_FUNC_RESTRICT noexcept {
 //                auto k_seed0_hash = hash_(key, seed0_);
                 size_t bucket_index = GetBucketIndex(k_seed0_hash);
-                size_t bucket_param = bucket_p_array_[bucket_index];
+                auto bucket_param = bucket_p_array_[bucket_index];
                 auto temp_offset = bucket_param >> 1U;
-                auto optional_bit = bucket_param & size_t(0x1UL);
+                auto optional_bit = bucket_param & 0x1U;
 
 
-                auto temp_hash_value = MidHash(k_seed0_hash, seed2_ + optional_bit);
+                auto temp_hash_value = MidHash(k_seed0_hash, MixSeedAndBit(seed2_, optional_bit));
 //                auto temp_hash_value = hash_(key, seed2_ + optional_bit);
 
                 auto reverse_offset = slot_index_policy_.ReverseMap(temp_offset);
@@ -2001,7 +1983,7 @@ namespace fph {
             FPH_ALWAYS_INLINE size_t GetSlotPos(const key_type &key, size_t offset, size_t optional_bit)
             const FPH_FUNC_RESTRICT noexcept {
                 auto k_seed0_hash = hash_(key, seed0_);
-                auto temp_hash_value = MidHash(k_seed0_hash, seed2_ + optional_bit);
+                auto temp_hash_value = MidHash(k_seed0_hash, MixSeedAndBit(seed2_, optional_bit));
                 //  auto temp_hash_value = (hash_(key, seed2_ + optional_bit));
                 size_t reverse_offset = slot_index_policy_.ReverseMap(offset);
                 auto slot_pos = slot_index_policy_.MapToIndex(temp_hash_value + reverse_offset);
@@ -2397,6 +2379,10 @@ namespace fph {
 
             }
 
+            FPH_ALWAYS_INLINE static size_t MixSeedAndBit(size_t seed, uint32_t optional_bit) {
+                return seed + optional_bit;
+            }
+
             static FPH_ALWAYS_INLINE size_t MixValue(size_t hash_value, size_t seed) {
                 return hash_value * seed;
             }
@@ -2748,9 +2734,9 @@ namespace fph {
                         int original_default_key_pos_empty_status = IsSlotEmpty(original_default_key_pos);
                         auto bucket_index = GetBucketIndex(k_seed0_hash);
 //                        size_t bucket_index = GetBucketIndex(key);
-                        size_t bucket_param = bucket_p_array_[bucket_index];
+                        auto bucket_param = bucket_p_array_[bucket_index];
                         auto bucket_offset = bucket_param >> 1U;
-                        auto optional_bit = bucket_param & size_t(0x1UL);
+                        auto optional_bit = bucket_param & 0x1U;
 
                         bool pattern_matched_flag = false;
 
@@ -2761,10 +2747,9 @@ namespace fph {
 
                         std::vector<size_t, SizeTAllocator> bucket_pattern;
 
-                        for (size_t bucket_try_bit = optional_bit;
-                             bucket_try_bit < 2; ++bucket_try_bit) {
+                        for (auto bucket_try_bit = optional_bit; bucket_try_bit < 2U; ++bucket_try_bit) {
 
-                            auto try_seed = seed2_ + bucket_try_bit;
+                            auto try_seed = MixSeedAndBit(seed2_, bucket_try_bit);
 
 
                             bucket_pattern.clear();
@@ -3355,9 +3340,9 @@ namespace fph {
 
                                 bool pattern_matched_flag = false;
 
-                                for (size_t bucket_try_bit = 0; bucket_try_bit < 2; ++bucket_try_bit) {
+                                for (size_t bucket_try_bit = 0; bucket_try_bit < 2U; ++bucket_try_bit) {
 
-                                    auto try_seed = seed2_ + bucket_try_bit;
+                                    auto try_seed = MixSeedAndBit(seed2_, bucket_try_bit);
 
                                     bucket_pattern.clear();
 
