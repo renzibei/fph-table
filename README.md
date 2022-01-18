@@ -14,7 +14,7 @@ lookup is very important, and the number of insertions is small compared to the 
 ## Performance
 
 Here we show the timing of the `find`operation when a 64-bit integer is used as the key. The results are from the
-[hashtable-bench](https://github.com/renzibei/hashtable-bench) project, which evaluate hash maps on different datasets.
+[hashtable-bench](https://github.com/renzibei/hashtable-bench) project, which evaluates hash maps on different datasets.
 
 Figures 1 and 2 show the lookup time of multiple hash tables using different hash functions on the x86-64 platform and
 arm64 platform. It can be seen that `fph::DynamicFphMap` has a clear speed advantage in lookup on this dataset.
