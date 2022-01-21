@@ -206,12 +206,43 @@ int main() {
 ```
 
 ## Instructions for use
+### Calculate the distinct slot index only
+
 You can use the containers we provided to replace `std::unordered_set` or `std::unrodered_map` if
 you care more about lookup performance. Or if all you need is a perfect hash function i.e. a mapping
 from keys to the integers in a limited range, you can use the
 `fph::DynamicFphSet::GetSlotPos(const key_type &key)` function to get the slot index of one key in
 the table, which is unique. The `GetSlotPos` is always faster than the `find` lookup as it does not
 fetch data from the slots (which occupy most of the memory of a hash table).
+
+### Requirement of the seed hash function
+
+To avoid calling the hash function twice, we require that there exists a seed such that all actually inserted elements have different hash values with that seed. This is quite easy to for integers whose type is 64 bits. Identity hash, for example, is an injective (and bijective) function from 64-bit integers to 64-bit integers. And if the length of the key exceeds 64 bits and the size of hash value is 64 bits, then there is a possibility of collision. When the number of elements to be inserted is relatively small (for example, less than 10^9), we can find a hash function that satisfies the condition (injective) with a very high probability by replacing the seed. But if the number of elements is very large (more than 10^9), then the probability of collision will be too high. There are two solutions to this problem: 1. Instead of computing the hash once, compute the hash twice. This no longer requires the existence of a seed to make the hash injective to the inserted element. 2. Take a 128-bit hash function, so that the probability of collision is small enough.
+
+At present, we have implemented the first method in another branch, which does not need to change the code on the user side (provide a 128-bit hash function for custom classes). The disadvantage is that because the hash value is calculated twice, the speed will be slower than the one-time solution.
+
+We provide three kinds of SeedHash function for basic types: `fph::SimpleSeedHash<T>`,
+`fph::MixSeedHash<T>` and `fph::StrongSeedHash<T>`;
+The SimpleSeedHash has the fastest calculation speed and the weakest hash distribution, while the
+StrongSeedHash is the slowest of them to calculate but has the best distribution of hash value.
+The MixSeedHash is in the mid of them.
+Take integer for an example, if the keys you want to insert are not uniformly distributed in
+the integer interval of that type, then the hash value may probably not be uniformly distributed
+in the hash type interval as well for a weak hash function. But with a strong hash function,
+you can easily produce uniformly distributed hash values regardless of your input distribution.
+ The default Seed Hash function is the `fph::SimpleSeedHash<T>` as it is
+the fastest, and it is good enough for most of the input data in real life.
+
+Tips: Know the patterns of the input keys before choosing the seed hash function. If the keys may
+cause a failure in the building of the table (which is rare for the hash functions we provide),
+use a stronger seed hash function. Don't write you own seed hash function unless you know they
+are good hash functions.
+
+If the user wants to write a custom seed hash function for the key type, refer to the
+fph::SimpleSeedHash<T>; the functor needs to take both a key and a seed (size_t) as input arguments and
+return a size_t type hash value;
+
+### Further optimize lookup
 
 The classic `find(const key_type&key)` function can be further optimized if the key is guaranteed
 to be in the hash table. There is one comparison and branch instruction in the `find` function,
@@ -236,6 +267,8 @@ smaller slots if the load_factor can be larger in that case. (Make sure almost n
 be added to the table after this because the insert operation will be very slow when the
 load_factor is very large.)
 
+### Memory usage
+
 The extra hot memory space besides slots during querying is the space for buckets (this concept is
 not the bucket in the STL unordered_set, it is from FCH algorithm), the size of
 this extra memory is about `c * n / (log2(n) + 1) * sizeof(BucketParamType)` bytes. c is a
@@ -246,25 +279,5 @@ the BucketParamType that is just large enough but not too large if you don't wan
 memory and cache size. The memory size for this extra hot memory space will be slightly
 larger than `c * n` bits.
 
+More extra space is required for hash table expansion and reconstruction. In order to optimize the memory allocation time, we did not actively release these spaces, but these additional spaces can be released.
 
-We provide three kinds of SeedHash function for basic types: `fph::SimpleSeedHash<T>`,
-`fph::MixSeedHash<T>` and `fph::StrongSeedHash<T>`;
-The SimpleSeedHash has the fastest calculation speed and the weakest hash distribution, while the
-StrongSeedHash is the slowest of them to calculate but has the best distribution of hash value.
-The MixSeedHash is in the mid of them.
-Take integer for an example, if the keys you want to insert are not uniformly distributed in
-the integer interval of that type, then the hash value may probably not be uniformly distributed
-in the hash type interval as well for a weak hash function. But with a strong hash function,
-you can easily produce uniformly distributed hash values regardless of your input distribution.
-If the hash values of the input keys are not uniformly distributed, there may be a failure in the
-building of the hash table. The default Seed Hash function is the `fph::SimpleSeedHash<T>` as it is
-the fastest, and it is good enough for most of the input data in real life.
-
-Tips: Know the patterns of the input keys before choosing the seed hash function. If the keys may
-cause a failure in the building of the table (which is rare for the hash functions we provide),
-use a stronger seed hash function. Don't write you own seed hash function unless you know they
-are good hash functions.
-
-If the user wants to write a custom seed hash function for the key type, refer to the
-fph::SimpleSeedHash<T>; the functor needs to take both a key and a seed (size_t) as input arguments and
-return a size_t type hash value;
