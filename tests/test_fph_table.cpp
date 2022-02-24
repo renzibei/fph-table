@@ -650,8 +650,8 @@ void ConstructTable(Table &table, const PairVec &pair_vec, size_t seed, double c
         }
         if constexpr (table_type == DYNAMIC_FPH_TABLE) {
             if (do_rehash) {
-                if (table.load_factor() < 0.6) {
-                    table.max_load_factor(0.943);
+                if (table.load_factor() < 0.45) {
+                    table.max_load_factor(0.9);
                     table.rehash(table.size());
                 }
             }
@@ -1139,7 +1139,7 @@ std::tuple<uint64_t, uint64_t> TestTableLookUp(Table &table, size_t lookup_time,
     if constexpr(table_type == DYNAMIC_FPH_TABLE) {
         table.max_load_factor(max_load_factor);
     }
-    ConstructTable<table_type, Table, PairVec, GetKey>(table, input_vec, random_dis(random_engine), c, true, true);
+    ConstructTable<table_type, Table, PairVec, GetKey>(table, input_vec, random_dis(random_engine), c, true, false);
     std::shuffle(pair_vec.begin(), pair_vec.end(), random_engine);
 
     auto look_up_t0 = std::chrono::high_resolution_clock::now();
@@ -1315,7 +1315,7 @@ void TestTablePerformance(size_t element_num, size_t construct_time, size_t look
         Table table;
         std::tie(iterate_ns, it_useless_sum) = TestTableIterate<table_type, Table,
                 std::vector<mutable_value_type>, GetKey>(
-                table, lookup_time / element_num, src_vec, construct_seed, max_load_factor, c);
+                table, iterate_time, src_vec, construct_seed, max_load_factor, c);
     }
 
     LogHelper::log(Info, "%s %lu elements, sizeof(value_type)=%lu, load_factor: %.3f, construct with reserve avg use %.6f s,"
@@ -1562,9 +1562,9 @@ void TestMapPerformance() {
     using RandomGenerator = RandomPairGen<KeyType, ValueType, KeyRandomGen , ValueRandomGen>;
 
 
-//    using SeedHash = fph::SimpleSeedHash<KeyType>;
+    using SeedHash = fph::SimpleSeedHash<KeyType>;
 //    using SeedHash = fph::StrongSeedHash<KeyType>;
-    using SeedHash = fph::MixSeedHash<KeyType>;
+//    using SeedHash = fph::MixSeedHash<KeyType>;
 //    using SeedHash = TestKeySeedHash;
 
     using Allocator = std::allocator<std::pair<const KeyType, ValueType>>;

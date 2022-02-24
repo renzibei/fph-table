@@ -67,6 +67,7 @@ void TestFphMap() {
     fph_map.template try_emplace<>(TestKeyClass("f"), 6);
     fph_map[TestKeyClass("g")] = 7;
     fph_map.erase(TestKeyClass("a"));
+    fph_map.erase(const_cast<const FphMap*>(&fph_map)->find(TestKeyClass("b")));
 
     std::cout << "Fph map now has elements: " << std::endl;
     for (const auto& [k, v]: fph_map) {
