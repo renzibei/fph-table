@@ -597,7 +597,7 @@ namespace fph {
             return IdentitySeedHash64(key, seed);
         }
 
-        size_t ChosenMixSeedHash64(uint64_t key, size_t seed) {
+        FPH_ALWAYS_INLINE size_t ChosenMixSeedHash64(uint64_t key, size_t seed) {
 //            return RevMulSeedHash64(key, seed);
 //            return MulMovSeedHash64(key, seed);
 //            return ShiftMulSeedHash64(key, seed);
@@ -605,23 +605,23 @@ namespace fph {
 //            return Ano4SeedHash64(key, seed);
         }
 
-        size_t ChosenStrongSeedHash64(uint64_t key, size_t seed) {
+        FPH_ALWAYS_INLINE size_t ChosenStrongSeedHash64(uint64_t key, size_t seed) {
             return Ano2SeedHash64(key, seed);
         }
 
-        size_t ChosenSimpleSeedHash16(uint16_t key, size_t seed) {
+        FPH_ALWAYS_INLINE size_t ChosenSimpleSeedHash16(uint16_t key, size_t seed) {
             return RotMulSeedHash64(key, seed);
         }
 
 
 
-        size_t ChosenSeedHash16(uint16_t key, size_t seed) {
+        FPH_ALWAYS_INLINE size_t ChosenSeedHash16(uint16_t key, size_t seed) {
 //            return RotMulSeedHash16(key, seed);
             return AnoSeedHash64(key, seed);
 //            return Ano3SeedHash16(key, seed);
         }
 
-        size_t ChosenSeedHash32(uint32_t key, size_t seed) {
+        FPH_ALWAYS_INLINE size_t ChosenSeedHash32(uint32_t key, size_t seed) {
             return Ano2SeedHash32(key, seed);
         }
 
@@ -799,11 +799,11 @@ namespace fph {
         }
 
 
-        std::string ToString(const std::string& t) {
+        inline std::string ToString(const std::string& t) {
             return t;
         }
 
-        std::string ToString(const char* src) {
+        inline std::string ToString(const char* src) {
             return src;
         }
 
