@@ -60,14 +60,22 @@ but makes the process of constructing the hash slower.
 To be able to dynamically add key values to the hash table, whenever a new key makes
 the hash no longer a perfect hash, we will rebuild the hash table.
 
+
 ## Difference compared to std
 1. The template parameter `SeedHash` is different from the `Hash` in STL, it has to be a functor
-accept two arguments: both the key and the seed
+   accept two arguments: both the key and the seed
 2. If the key type is not a common type, you will have to provide a random generator for the key
-with the template parameter `RandomKeyGenerator`
+   with the template parameter `RandomKeyGenerator`
 3. The keys have to be CopyConstructible
 4. The values have to be MoveConstructible
 5. May invalidates any references and pointers to elements within the table after rehash
+
+## No seed hash version
+The normal version of fph table requires a seed hash function. There exists a no-seed version where
+a no-seed hash function like `std::hash` can be used. See [no seed version](#No-seed-version) in the
+[Instructions for use section](#Instructions-for-use) for more information.
+more information.
+
 
 ## Build
 Requirement: C++ standard not older than C++17; currently only tested in GCC/Clang/MSVC (no compile error in MSVC).
@@ -217,9 +225,21 @@ fetch data from the slots (which occupy most of the memory of a hash table).
 
 ### Requirement of the seed hash function
 
-To avoid calling the hash function twice, we require that there exists a seed such that all actually inserted elements have different hash values with that seed. This is quite easy to for integers whose type is 64 bits. Identity hash, for example, is an injective (and bijective) function from 64-bit integers to 64-bit integers. And if the length of the key exceeds 64 bits and the size of hash value is 64 bits, then there is a possibility of collision. When the number of elements to be inserted is relatively small (for example, less than 10^9), we can find a hash function that satisfies the condition (injective) with a very high probability by replacing the seed. But if the number of elements is very large (more than 10^9), then the probability of collision will be too high. There are two solutions to this problem: 1. Instead of computing the hash once, compute the hash twice. This no longer requires the existence of a seed to make the hash injective to the inserted element. 2. Take a 128-bit hash function, so that the probability of collision is small enough.
+To avoid calling the hash function twice, we require that there exists a seed such that all
+actually inserted elements have different hash values with that seed. This is quite easy to for
+integers whose type is 64 bits. Identity hash, for example, is an injective (and bijective) function
+from 64-bit integers to 64-bit integers. And if the length of the key exceeds 64 bits and the size
+of hash value is 64 bits, then there is a possibility of collision. When the number of elements to
+be inserted is relatively small (for example, less than 10^9), we can find a hash function that
+satisfies the condition (injective) with a very high probability by replacing the seed. But if the
+number of elements is very large (more than 10^9), then the probability of collision will be too
+high. There are two solutions to this problem: 1. Instead of computing the hash once, compute the
+hash twice. This no longer requires the existence of a seed to make the hash injective to the
+inserted element. 2. Take a 128-bit hash function, so that the probability of collision is small enough.
 
-At present, we have implemented the first method in another branch, which does not need to change the code on the user side (provide a 128-bit hash function for custom classes). The disadvantage is that because the hash value is calculated twice, the speed will be slower than the one-time solution.
+At present, we have implemented the first method in another branch, which does not need to change
+the code on the user side (provide a 128-bit hash function for custom classes). The disadvantage is
+that because the hash value is calculated twice, the speed will be slower than the one-time solution.
 
 We provide three kinds of SeedHash function for basic types: `fph::SimpleSeedHash<T>`,
 `fph::MixSeedHash<T>` and `fph::StrongSeedHash<T>`;
@@ -230,7 +250,7 @@ Take integer for an example, if the keys you want to insert are not uniformly di
 the integer interval of that type, then the hash value may probably not be uniformly distributed
 in the hash type interval as well for a weak hash function. But with a strong hash function,
 you can easily produce uniformly distributed hash values regardless of your input distribution.
- The default Seed Hash function is the `fph::SimpleSeedHash<T>` as it is
+The default Seed Hash function is the `fph::SimpleSeedHash<T>` as it is
 the fastest, and it is good enough for most of the input data in real life.
 
 Tips: Know the patterns of the input keys before choosing the seed hash function. If the keys may
@@ -241,6 +261,21 @@ are good hash functions.
 If the user wants to write a custom seed hash function for the key type, refer to the
 fph::SimpleSeedHash<T>; the functor needs to take both a key and a seed (size_t) as input arguments and
 return a size_t type hash value;
+
+### No seed version
+
+The no-seed version is provided for situations where a no-seed hash function has to be used.
+Compared to the seed version, the no-seed version hash table does not require a `SeedHash`. The
+hash table in this version requires the same `Hash` function that the STL unordered containers use.
+However, there is a requirement for the no-seed hash function: all the actually inserted elements
+have different hash values. Similar to the requirement of the seed hash function, this is easy for
+64-bit keys, identity hash is good enough as a hash function for this hash table. And if the length
+of the key exceeds 64 bits and the size of hash value is 64 bits, then there is a possibility of
+collision.
+You can switch to the no seed version by change to the `noseed` branch.
+```
+git checkout noseed
+```
 
 ### Further optimize lookup
 
