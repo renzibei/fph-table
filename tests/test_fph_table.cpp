@@ -1335,6 +1335,7 @@ void TestTablePerformance(size_t element_num, size_t construct_time, size_t look
 
 void TestSet() {
 //    using KeyType = uint64_t;
+//    using KeyType = uint64_t*;
 //    using KeyType = std::string;
     using KeyType = TestKeyClass;
 //    using SeedHash = fph::SimpleSeedHash<KeyType>;
@@ -1398,7 +1399,7 @@ void TestSet() {
         }
 ////
         if (TestCorrectness<RandomKeyGenerator, DyFphFphSet31bit, BenchTable>(500000ULL,
-                                                                       1)) {
+                                                                       3)) {
             LogHelper::log(Info, "Pass DyFphFphSet31Bit test with %d keys", 500000ULL);
         }
         else {
@@ -1424,28 +1425,35 @@ struct FixSizeStruct {
 
 
 void TestFPH() {
-//    using KeyType = uint32_t;
-    using KeyType = TestKeyClass;
+    using KeyType = uint32_t;
+//    using KeyType = TestKeyClass;
 //    using KeyType = std::string;
-//    using ValueType = uint64_t;
-    using ValueType = TestValueClass;
+//    using KeyType = const uint64_t*;
+//    using KeyType = enum {
+//        Type0,
+//        Type1,
+//        Type2,
+//        Type3,
+//    };
+    using ValueType = uint64_t;
+//    using ValueType = TestValueClass;
 //    using ValueType = std::string;
 //    using ValueType = FixSizeStruct<96>;
 //    using BucketParamType = uint32_t;
 
-    using KeyRandomGen = KeyClassRNG;
-//    using KeyRandomGen = fph::dynamic::RandomGenerator<KeyType>;
+//    using KeyRandomGen = KeyClassRNG;
+    using KeyRandomGen = fph::dynamic::RandomGenerator<KeyType>;
 
-//    using ValueRandomGen = fph::dynamic::RandomGenerator<ValueType>;
-    using ValueRandomGen = ValueClassRNG;
+    using ValueRandomGen = fph::dynamic::RandomGenerator<ValueType>;
+//    using ValueRandomGen = ValueClassRNG;
 
     using RandomGenerator = RandomPairGen<KeyType, ValueType, KeyRandomGen , ValueRandomGen>;
 
 
-//    using SeedHash = fph::SimpleSeedHash<KeyType>;
+    using SeedHash = fph::SimpleSeedHash<KeyType>;
 //    using SeedHash = fph::StrongSeedHash<KeyType>;
 //    using SeedHash = fph::MixSeedHash<KeyType>;
-    using SeedHash = TestKeySeedHash;
+//    using SeedHash = TestKeySeedHash;
 
     using DyFphMap7bit = fph::DynamicFphMap<KeyType, ValueType, SeedHash, std::equal_to<>,
     std::allocator<std::pair<const KeyType, ValueType>>, uint8_t, KeyRandomGen>;
@@ -1463,8 +1471,8 @@ void TestFPH() {
 
 //    using HashMethod = robin_hood::hash<KeyType>;
 //    using HashMethod = absl::Hash<KeyType>;
-//    using HashMethod = std::hash<KeyType>;
-    using HashMethod = TestKeyHash;
+    using HashMethod = std::hash<KeyType>;
+//    using HashMethod = TestKeyHash;
 
 //    using BenchTable = absl::flat_hash_map<KeyType, ValueType, HashMethod>;
     using BenchTable = std::unordered_map<KeyType, ValueType, HashMethod>;
@@ -1547,6 +1555,7 @@ void TestFPH() {
 
 void TestMapPerformance() {
     using KeyType = uint64_t;
+
 //    using KeyType = TestKeyClass;
 //    using KeyType = std::string;
     using ValueType = uint64_t;

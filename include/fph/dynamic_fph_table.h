@@ -793,9 +793,15 @@ namespace fph {
             }
         };
 
-        template<class T>
+        template<class T, typename std::enable_if_t<!std::is_pointer<T>::value>* = nullptr>
         std::string ToString(const T& t) {
             return std::to_string(t);
+        }
+
+        template<class T, typename std::enable_if_t<std::is_pointer<T>::value>* = nullptr>
+        std::string ToString(T p) {
+            auto x = reinterpret_cast<uintptr_t>(p);
+            return std::to_string(x);
         }
 
 
@@ -1066,9 +1072,9 @@ namespace fph {
                 return *this;
             }
 
-            uint64_t operator()() {
+            T operator()() {
                 auto ret = random_gen(random_engine);
-                return ret;
+                return static_cast<T>(ret);
             }
 
             void seed(uint64_t seed = 0) {
@@ -1081,8 +1087,32 @@ namespace fph {
         protected:
             std::mt19937_64 random_engine;
             std::uniform_int_distribution<T> random_gen;
+        };
 
-//
+        template<class T>
+        class RandomGenerator<T, typename std::enable_if<std::is_enum<T>::value>::type>
+                : public RandomGenerator<uint64_t> {
+        using BaseType = RandomGenerator<uint64_t>;
+        public:
+            using BaseType::BaseType;
+            T operator()() {
+                auto ret = random_gen(random_engine);
+                return static_cast<T>(ret);
+            }
+        };
+
+        template<class T>
+        class RandomGenerator<T, typename std::enable_if<std::is_pointer<T>::value>::type>:
+                public RandomGenerator<uintptr_t>{
+        using BaseType = RandomGenerator<uintptr_t>;
+        public:
+            using BaseType::BaseType;
+
+            T operator()() {
+                auto ret = random_gen(random_engine);
+                return reinterpret_cast<T>(ret);
+            }
+
         };
 
         template<>
@@ -1537,7 +1567,7 @@ namespace fph {
                        bool verbose = false, double c = DEFAULT_BITS_PER_KEY,
                        double keys_first_part_ratio = DEFAULT_KEYS_FIRST_PART_RATIO, double buckets_first_part_ratio = DEFAULT_BUCKETS_FIRST_PART_RATIO,
                        size_t max_try_seed2_time = 1000, size_t max_reseed2_time = 1000) {
-                constexpr size_t max_try_seed0_time = 20;
+                constexpr size_t max_try_seed0_time = 10;
                 constexpr size_t max_try_seed1_time = 100;
                 BuildImp<is_rehash, use_move, last_element_only_has_key>(pair_begin, pair_end, seed,
                                                                          verbose, c, keys_first_part_ratio,
