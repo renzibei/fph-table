@@ -28,6 +28,12 @@ struct TestKeySeedHash {
     }
 };
 
+struct TestKeyHash {
+    size_t operator()(const TestKeyClass &src) const {
+        return std::hash<std::string>{}(src.data);
+    }
+};
+
 // a random key generator is needed for the Fph Hash Table;
 // If using a custom class, a random generator of the key should be provided.
 class KeyClassRNG {
@@ -46,12 +52,13 @@ protected:
 void TestFphMap() {
     using KeyType = TestKeyClass;
     using MappedType = uint64_t;
-    using SeedHash = TestKeySeedHash;
+//    using SeedHash = TestKeySeedHash;
+    using Hash = TestKeyHash;
     using Allocator = std::allocator<std::pair<const KeyType, MappedType>>;
     using BucketParamType = uint32_t;
     using KeyRNG = KeyClassRNG;
 
-    using FphMap = fph::DynamicFphMap<KeyType, MappedType, SeedHash, std::equal_to<>, Allocator,
+    using FphMap = fph::DynamicFphMap<KeyType, MappedType, Hash, std::equal_to<>, Allocator,
                                         BucketParamType , KeyRNG>;
 
     FphMap fph_map = {{TestKeyClass("a"), 1}, {TestKeyClass("b"), 2}, {TestKeyClass("c"), 3},

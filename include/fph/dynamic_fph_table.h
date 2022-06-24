@@ -1297,7 +1297,7 @@ namespace fph {
 
     namespace dynamic::detail {
 
-        template<class Policy, class SeedHash, class KeyEqual, class Allocator, class BucketParamType,
+        template<class Policy, class Hash, class KeyEqual, class Allocator, class BucketParamType,
                 class RandomKeyGenerator>
         class DynamicRawSet {
         public:
@@ -1306,7 +1306,7 @@ namespace fph {
             using value_type = typename Policy::value_type;
             using size_type = std::size_t;
             using difference_type = std::ptrdiff_t;
-            using hasher = SeedHash;
+            using hasher = Hash;
             using key_equal = KeyEqual;
             using allocator_type = Allocator;
             using reference = value_type &;
@@ -1322,7 +1322,7 @@ namespace fph {
             friend const_iterator;
 #endif
 
-            explicit DynamicRawSet(size_type bucket_count, const SeedHash& hash = SeedHash(),
+            explicit DynamicRawSet(size_type bucket_count, const Hash& hash = Hash(),
                                    const key_equal& equal = key_equal(),
                                    const Allocator& alloc = Allocator()) :
 #if FPH_DY_DUAL_BUCKET_SET
@@ -1335,7 +1335,6 @@ namespace fph {
 #endif
 //                    item_num_mask_(bucket_count - 1U),
                     slot_index_policy_{bucket_count},
-                    seed0_(0),
                     seed1_(0), seed2_(0),
                     bucket_p_array_{nullptr},
                     slot_(nullptr),
@@ -1363,18 +1362,18 @@ namespace fph {
             DynamicRawSet(): DynamicRawSet(DEFAULT_INIT_ITEM_NUM_CEIL) {}
 
             DynamicRawSet(size_type bucket_count, const Allocator& alloc):
-                    DynamicRawSet(bucket_count, SeedHash(), key_equal(), alloc) {}
+                    DynamicRawSet(bucket_count, Hash(), key_equal(), alloc) {}
 
-            DynamicRawSet(size_type bucket_count, const SeedHash& seed_hash, const Allocator& alloc):
+            DynamicRawSet(size_type bucket_count, const Hash& seed_hash, const Allocator& alloc):
                     DynamicRawSet(bucket_count, seed_hash, key_equal(), alloc) {}
 
             explicit DynamicRawSet(const Allocator& alloc):
-                    DynamicRawSet(DEFAULT_INIT_ITEM_NUM_CEIL, SeedHash(), key_equal(), alloc) {}
+                    DynamicRawSet(DEFAULT_INIT_ITEM_NUM_CEIL, Hash(), key_equal(), alloc) {}
 
             template< class InputIt >
             DynamicRawSet(InputIt first, InputIt last,
                           size_type bucket_count = DEFAULT_INIT_ITEM_NUM_CEIL,
-                          const SeedHash& hash = SeedHash(),
+                          const Hash& hash = Hash(),
                           const key_equal& equal = key_equal(),
                           const Allocator& alloc = Allocator()):
                     DynamicRawSet(std::max(size_type(std::distance(first, last)), bucket_count), hash, equal, alloc) {
@@ -1384,11 +1383,11 @@ namespace fph {
             template< class InputIt >
             DynamicRawSet(InputIt first, InputIt last,
                           size_type bucket_count, const Allocator& alloc ):
-                    DynamicRawSet(first, last, bucket_count, SeedHash(), key_equal(), alloc) {}
+                    DynamicRawSet(first, last, bucket_count, Hash(), key_equal(), alloc) {}
 
             template< class InputIt >
             DynamicRawSet(InputIt first, InputIt last, size_type bucket_count,
-                          const SeedHash& hash, const Allocator& alloc ):
+                          const Hash& hash, const Allocator& alloc ):
                     DynamicRawSet(first, last, bucket_count, hash, key_equal(), alloc) {}
 
             DynamicRawSet(const DynamicRawSet &other, const Allocator& alloc):
@@ -1402,7 +1401,6 @@ namespace fph {
 #endif
 //                    item_num_mask_(other.item_num_mask_),
                     slot_index_policy_(other.slot_index_policy_),
-                    seed0_(other.seed0_),
                     seed1_(other.seed1_),
                     seed2_(other.seed2_),
                     bucket_p_array_(nullptr),
@@ -1476,7 +1474,6 @@ namespace fph {
 #endif
 //                    item_num_mask_(std::exchange(other.item_num_mask_, 0)),
                     slot_index_policy_(std::move(other.slot_index_policy_)),
-                    seed0_(std::exchange(other.seed0_, 0x3284723912901723ULL)),
                     seed1_(std::exchange(other.seed1_, 0x123456797291071ULL)),
                     seed2_(std::exchange(other.seed2_, 0x832748923732847ULL)),
                     bucket_p_array_(std::exchange(other.bucket_p_array_, nullptr)),
@@ -1509,7 +1506,6 @@ namespace fph {
 //                    bucket_mask_(std::exchange(other.bucket_mask_, 0)),
                     bucket_index_policy_(std::move(other.bucket_index_policy_)),
 #endif
-                    seed0_(std::exchange(other.seed0_, 0x3284723912901723ULL)),
                     seed1_(std::exchange(other.seed1_, 0x123456797291071ULL)),
                     seed2_(std::exchange(other.seed2_, 0x832748923732847ULL)),
 
@@ -1524,16 +1520,16 @@ namespace fph {
 
             DynamicRawSet(std::initializer_list<value_type> init,
                           size_type bucket_count = DEFAULT_INIT_ITEM_NUM_CEIL,
-                          const SeedHash& hash = SeedHash(), const key_equal& equal = key_equal(),
+                          const Hash& hash = Hash(), const key_equal& equal = key_equal(),
                           const Allocator& alloc = Allocator())
                     : DynamicRawSet(init.begin(), init.end(), bucket_count, hash, equal, alloc){}
 
             DynamicRawSet(std::initializer_list<value_type> init,
                           size_type bucket_count, const Allocator& alloc)
-                    : DynamicRawSet(init.begin(), init.end(), bucket_count, SeedHash(), key_equal(), alloc){}
+                    : DynamicRawSet(init.begin(), init.end(), bucket_count, Hash(), key_equal(), alloc){}
 
             DynamicRawSet(std::initializer_list<value_type> init, size_type bucket_count,
-                          const SeedHash& hash, const Allocator& alloc)
+                          const Hash& hash, const Allocator& alloc)
                     : DynamicRawSet(init.begin(), init.end(), bucket_count, hash, key_equal(), alloc){}
 
             DynamicRawSet& operator=(const DynamicRawSet& other) {
@@ -1567,7 +1563,7 @@ namespace fph {
                        bool verbose = false, double c = DEFAULT_BITS_PER_KEY,
                        double keys_first_part_ratio = DEFAULT_KEYS_FIRST_PART_RATIO, double buckets_first_part_ratio = DEFAULT_BUCKETS_FIRST_PART_RATIO,
                        size_t max_try_seed2_time = 1000, size_t max_reseed2_time = 1000) {
-                constexpr size_t max_try_seed0_time = 10;
+                constexpr size_t max_try_seed0_time = 5;
                 constexpr size_t max_try_seed1_time = 100;
                 BuildImp<is_rehash, use_move, last_element_only_has_key>(pair_begin, pair_end, seed,
                                                                          verbose, c, keys_first_part_ratio,
@@ -1937,7 +1933,7 @@ namespace fph {
              * @return
              */
             FPH_ALWAYS_INLINE size_t GetSlotPos(const key_type &key) const FPH_FUNC_RESTRICT noexcept {
-                auto k_seed0_hash = hash_(key, seed0_);
+                auto k_seed0_hash = hash_(key);
                 size_t bucket_index = GetBucketIndex(k_seed0_hash);
                 auto bucket_param = bucket_p_array_[bucket_index];
                 auto temp_offset = bucket_param >> 1U;
@@ -1972,7 +1968,7 @@ namespace fph {
 
             FPH_ALWAYS_INLINE size_t GetSlotPos(const key_type &key, size_t offset, size_t optional_bit)
             const FPH_FUNC_RESTRICT noexcept {
-                auto k_seed0_hash = hash_(key, seed0_);
+                auto k_seed0_hash = hash_(key);
                 auto temp_hash_value = MidHash(k_seed0_hash, MixSeedAndBit(seed2_, optional_bit));
                 //  auto temp_hash_value = (hash_(key, seed2_ + optional_bit));
                 size_t reverse_offset = slot_index_policy_.ReverseMap(offset);
@@ -2042,7 +2038,7 @@ namespace fph {
 //            size_t item_num_mask_; // direct
             IndexMapPolicy slot_index_policy_;
 
-            size_t seed0_;
+//            size_t seed0_;
             size_t seed1_, seed2_; // direct
 
             using BucketParamAllocator = typename std::allocator_traits<Allocator>::template rebind_alloc<BucketParamType>;
@@ -2239,7 +2235,7 @@ namespace fph {
             constexpr static double DEFAULT_KEYS_FIRST_PART_RATIO = 0.5;
             constexpr static double DEFAULT_BUCKETS_FIRST_PART_RATIO = 0.3;
 
-            static constexpr SeedHash hash_{}; // direct
+            static constexpr Hash hash_{}; // direct
 
             static constexpr KeyEqual key_equal_{}; // direct
 
@@ -2285,7 +2281,6 @@ namespace fph {
                 if (o.param_ != nullptr) {
                     o.param_->begin_it_.SetTable(std::addressof(o));
                 }
-                swap(seed0_, o.seed0_);
                 swap(seed1_, o.seed1_);
                 swap(seed2_, o.seed2_);
                 swap(bucket_p_array_, o.bucket_p_array_);
@@ -2307,7 +2302,7 @@ namespace fph {
 
             FPH_ALWAYS_INLINE size_t CompleteGetBucketIndex(const key_type& FPH_RESTRICT key) const FPH_FUNC_RESTRICT noexcept {
 //                size_t temp_hash1 = hash_(key, seed1_);
-                auto k_seed0_hash = hash_(key, seed0_);
+                auto k_seed0_hash = hash_(key);
                 size_t temp_hash1 = MidHash(k_seed0_hash, seed1_);
 #if FPH_DY_DUAL_BUCKET_SET
                 size_t temp_value = temp_hash1 & item_num_mask_;
@@ -2382,7 +2377,7 @@ namespace fph {
             }
 
             FPH_ALWAYS_INLINE size_t CompleteHash(const key_type& FPH_RESTRICT key, size_t seed) const FPH_FUNC_RESTRICT noexcept {
-                auto hash_k_seed0 = hash_(key, seed0_);
+                auto hash_k_seed0 = hash_(key);
                 return MixValue(hash_k_seed0, seed);
             }
 
@@ -2684,7 +2679,7 @@ namespace fph {
                                 MAX_ITEM_NUM_CEIL_LIMIT) {
                     rehash(param_->item_num_ceil_ + 1U);
                 }
-                auto k_seed0_hash = hash_(key, seed0_);
+                auto k_seed0_hash = hash_(key);
                 auto possible_pos = GetSlotPosBySeed0Hash(k_seed0_hash);
 //                auto possible_pos = GetSlotPos(key);
                 auto *insert_address = slot_ + possible_pos;
@@ -3215,8 +3210,8 @@ namespace fph {
 
                 for (size_t try_seed0_time = 0; try_seed0_time < max_try_seed0_time; ++ try_seed0_time) {
 
-                    seed0_ = random_dis(random_engine);
-                    seed0_ |= size_t(1ULL);
+//                    seed0_ = random_dis(random_engine);
+//                    seed0_ |= size_t(1ULL);
 
                     for (size_t try_seed1_time = 0; try_seed1_time < max_try_seed1_time; ++try_seed1_time) {
 
@@ -3720,20 +3715,20 @@ namespace fph {
     /**
      * The dynamic perfect hash set container
      * @tparam Key
-     * @tparam SeedHash the operator() takes two arguments: key and a size_t seed
+     * @tparam Hash
      * @tparam KeyEqual
      * @tparam Allocator
      * @tparam BucketParamType
      * @tparam RandomKeyGenerator the operator() returns a random key
      */
     template<class Key,
-            class SeedHash = SimpleSeedHash<Key>,
+            class Hash = std::hash<Key>,
             class KeyEqual = std::equal_to<Key>,
             class Allocator = std::allocator<Key>,
             class BucketParamType = uint32_t,
             class RandomKeyGenerator = dynamic::RandomGenerator<Key> >
     class DynamicFphSet: public dynamic::detail::DynamicRawSet<detail::DynamicFphSetPolicy<Key>,
-            SeedHash, KeyEqual, Allocator, BucketParamType, RandomKeyGenerator> {
+            Hash, KeyEqual, Allocator, BucketParamType, RandomKeyGenerator> {
         using Base = typename DynamicFphSet::DynamicRawSet;
     public:
         using Base::Base;
@@ -3842,21 +3837,21 @@ namespace fph {
      * The dynamic perfect hash map container
      * @tparam Key
      * @tparam T
-     * @tparam SeedHash the operator() takes two arguments: key and a size_t seed
+     * @tparam Hash the operator() takes two arguments: key and a size_t seed
      * @tparam KeyEqual
      * @tparam Allocator
      * @tparam BucketParamType
      * @tparam RandomKeyGenerator the operator() returns a random key
      */
     template <class Key, class T,
-            class SeedHash = SimpleSeedHash<Key>,
+            class Hash = std::hash<Key>,
             class KeyEqual = std::equal_to<Key>,
             class Allocator = std::allocator<std::pair<const Key, T>>,
             class BucketParamType = uint32_t,
             class RandomKeyGenerator = fph::dynamic::RandomGenerator<Key>
     >
     class DynamicFphMap : public dynamic::detail::DynamicRawSet<detail::DynamicFphMapPolicy<Key, T>,
-            SeedHash, KeyEqual, Allocator, BucketParamType, RandomKeyGenerator> {
+            Hash, KeyEqual, Allocator, BucketParamType, RandomKeyGenerator> {
         using Base = typename DynamicFphMap::DynamicRawSet;
     public:
 

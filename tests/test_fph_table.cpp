@@ -1334,18 +1334,19 @@ void TestTablePerformance(size_t element_num, size_t construct_time, size_t look
 
 
 void TestSet() {
-//    using KeyType = uint64_t;
+    using KeyType = uint64_t;
 //    using KeyType = uint64_t*;
 //    using KeyType = std::string;
-    using KeyType = TestKeyClass;
+//    using KeyType = TestKeyClass;
 //    using SeedHash = fph::SimpleSeedHash<KeyType>;
-    using SeedHash = TestKeySeedHash;
+//    using SeedHash = TestKeySeedHash;
+    using SeedHash = std::hash<KeyType>;
 //    using SeedHash = fph::MixSeedHash<KeyType>;
 //    using SeedHash = fph::StrongSeedHash<KeyType>;
     using BucketParamType = uint32_t;
 
-//    using RandomKeyGenerator = fph::dynamic::RandomGenerator<KeyType>;
-    using RandomKeyGenerator = KeyClassRNG;
+    using RandomKeyGenerator = fph::dynamic::RandomGenerator<KeyType>;
+//    using RandomKeyGenerator = KeyClassRNG;
 
     fph::DynamicFphSet<KeyType, SeedHash, std::equal_to<>,
     std::allocator<KeyType>, BucketParamType, RandomKeyGenerator> dy_fph_set;
@@ -1359,8 +1360,8 @@ void TestSet() {
 
     //    using HashMethod = robin_hood::hash<KeyType>;
 //    using HashMethod = absl::Hash<KeyType>;
-    using HashMethod = TestKeyHash;
-//    using HashMethod = std::hash<KeyType>;
+//    using HashMethod = TestKeyHash;
+    using HashMethod = std::hash<KeyType>;
 
     constexpr double TEST_CORR_MAX_LOAD_FACTOR = 0.7;
 
@@ -1449,8 +1450,8 @@ void TestFPH() {
 
     using RandomGenerator = RandomPairGen<KeyType, ValueType, KeyRandomGen , ValueRandomGen>;
 
-
-    using SeedHash = fph::SimpleSeedHash<KeyType>;
+    using SeedHash = std::hash<KeyType>;
+//    using SeedHash = fph::SimpleSeedHash<KeyType>;
 //    using SeedHash = fph::StrongSeedHash<KeyType>;
 //    using SeedHash = fph::MixSeedHash<KeyType>;
 //    using SeedHash = TestKeySeedHash;
@@ -1571,8 +1572,9 @@ void TestMapPerformance() {
     using RandomGenerator = RandomPairGen<KeyType, ValueType, KeyRandomGen , ValueRandomGen>;
 
 
-    using SeedHash = fph::SimpleSeedHash<KeyType>;
+//    using SeedHash = fph::SimpleSeedHash<KeyType>;
 //    using SeedHash = fph::StrongSeedHash<KeyType>;
+    using SeedHash = std::hash<KeyType>;
 //    using SeedHash = fph::MixSeedHash<KeyType>;
 //    using SeedHash = TestKeySeedHash;
 
