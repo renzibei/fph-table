@@ -3465,14 +3465,13 @@ namespace fph {
      * @tparam KeyEqual
      * @tparam Allocator
      * @tparam BucketParamType
-     * @tparam RandomKeyGenerator the operator() returns a random key
      */
     template<class Key,
             class SeedHash = meta::SimpleSeedHash<Key>,
             class KeyEqual = std::equal_to<Key>,
             class Allocator = std::allocator<Key>,
             class BucketParamType = uint32_t>
-class MetaFphSet: public meta::detail::MetaRawSet<meta::detail::MetaFphSetPolicy<Key>,
+    class MetaFphSet: public meta::detail::MetaRawSet<meta::detail::MetaFphSetPolicy<Key>,
             SeedHash, KeyEqual, Allocator, BucketParamType> {
         using Base = typename MetaFphSet::MetaRawSet;
     public:
@@ -3586,7 +3585,6 @@ class MetaFphSet: public meta::detail::MetaRawSet<meta::detail::MetaFphSetPolicy
      * @tparam KeyEqual
      * @tparam Allocator
      * @tparam BucketParamType
-     * @tparam RandomKeyGenerator the operator() returns a random key
      */
     template <class Key, class T,
             class SeedHash = meta::SimpleSeedHash<Key>,
