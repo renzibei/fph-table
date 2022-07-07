@@ -59,6 +59,6 @@ int main() {
                 temp_sum1, temp_sum);
         return -1;
     }
-    fprintf(stdout, "Pass test, temp_sum: %" PRIu64, temp_sum);
+    fprintf(stdout, "Pass test, temp_sum: %" PRIu64 "\n", temp_sum);
     return 0;
 }
