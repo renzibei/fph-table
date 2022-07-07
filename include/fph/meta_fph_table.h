@@ -1672,8 +1672,10 @@ namespace fph {
                 // according to benchmark, Apple Silicon chips can probably benefit from prefetch
                 FPH_PREFETCH(pair_address, 0, 1);
 #endif
-                if (MayEqual(slot_pos, seed1_hash) && key_equal_(pair_address->key, key)) {
-                    return iterator(pair_address, this);
+                if (MayEqual(slot_pos, seed1_hash)) {
+                    if FPH_LIKELY(key_equal_(pair_address->key, key)) {
+                        return iterator(pair_address, this);
+                    }
                 }
                 return end();
             }
@@ -1687,8 +1689,10 @@ namespace fph {
                 // according to benchmark, Apple Silicon chips can probably benefit from prefetch
                 FPH_PREFETCH(pair_address, 0, 1);
 #endif
-                if (MayEqual(slot_pos, seed1_hash) && key_equal_(pair_address->key, key)) {
-                    return const_iterator(pair_address, this);
+                if (MayEqual(slot_pos, seed1_hash)) {
+                    if FPH_LIKELY(key_equal_(pair_address->key, key)) {
+                        return const_iterator(pair_address, this);
+                    }
                 }
                 return end();
             }
