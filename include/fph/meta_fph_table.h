@@ -3456,7 +3456,6 @@ namespace fph {
      * @tparam KeyEqual
      * @tparam Allocator
      * @tparam BucketParamType
-     * @tparam RandomKeyGenerator the operator() returns a random key
      */
     template<class Key,
             class Hash = std::hash<Key>,
@@ -3577,7 +3576,6 @@ namespace fph {
      * @tparam KeyEqual
      * @tparam Allocator
      * @tparam BucketParamType
-     * @tparam RandomKeyGenerator the operator() returns a random key
      */
     template <class Key, class T,
             class Hash = std::hash<Key>,

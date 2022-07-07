@@ -29,7 +29,13 @@ For a comparison of more datasets and more operation types, please refer to the 
 
 <center>Figure 2: Look up keys in the map with 0.9 max_load_factor, tested in Apple M1 Max</center>
 
-
+`fph::MetaFphMap` is faster than `fph::DynamicFphMap` with `find` operation when try to find the
+keys that are not in the table and the elements number is large. `fph::MetaFphMap` uses a metadata
+array to save the information including the position markers and part of the hash values. So when it
+tries to find a key not in the table, we can probably use the metadata itself to know the fact that
+this key does not exist, without fetching the main slots. This can save the cache space.
+Correspondingly, when trying to find the keys in the table, or when the elements number is small,
+`fph::DynamicFphMap` will be faster.
 
 
 ## Algorithm
@@ -63,19 +69,19 @@ the hash no longer a perfect hash, we will rebuild the hash table.
 
 ## Difference compared to std
 1. The template parameter `SeedHash` is different from the `Hash` in STL, it has to be a functor
-accept two arguments: both the key and the seed
-2. If the key type is not a common type, you will have to provide a random generator for the key
-with the template parameter `RandomKeyGenerator`
-3. The keys have to be CopyConstructible
-4. The values have to be MoveConstructible
-5. May invalidates any references and pointers to elements within the table after rehash
+   accept two arguments: both the key and the seed. (There is also a no-seed version hash table).
+2. For `fph::DynamicFphSet` and `fph::DynamicFphMap`, if the key type is not a common type, you will have to provide a random generator for the key
+   with the template parameter `RandomKeyGenerator`. There is no such requirement for
+   `fph::MetaFphSet` and `fph::MetaFphMap`.
+3. The keys have to be CopyConstructible.
+4. The values have to be MoveConstructible.
+5. May invalidates any references and pointers to elements within the table after rehash.
 
 ## No seed hash version
 The normal version of fph table requires a seed hash function. There exists a no-seed version where
-a no-seed hash function like `std::hash` can be used. See [no seed version](#No-seed-version) in the
+a no-seed hash function like `std::hash` can be used. You can switch to `noseed` branch to use the
+no-seed version codes. See [no seed version](#No-seed-version) in the
 [Instructions for use section](#Instructions-for-use) for more information.
-more information.
-
 
 ## Build
 Requirement: C++ standard not older than C++17; currently only tested in GCC/Clang/MSVC (no compile error in MSVC).
@@ -113,9 +119,11 @@ make -j4
 
 The APIs are almost the same with the `std::unordered_set` and `std::unordered_map`.
 
-`fph::DynamicFphSet<Key, SeedHash, KeyEqual, Allocator, BucketParamType, RandomKeyGenerator>` is the
-fph set container. `fph::DynamicFphMap<Key, T, SeedHash, KeyEqual, Allocator, BucketParamType, RandomKeyGenerator>`
-is the fph map container.
+`fph::DynamicFphSet<Key, SeedHash, KeyEqual, Allocator, BucketParamType, RandomKeyGenerator>` and
+`fph::MetaFphSet<Key, SeedHash, KeyEqual, Allocator, BucketParamType>` are the fph set containers.
+`fph::DynamicFphMap<Key, T, SeedHash, KeyEqual, Allocator, BucketParamType, RandomKeyGenerator>`
+and `fph::MetaFphMap<Key, T, SeedHash, KeyEqual, Allocator, BucketParamType>` are the fph map
+containers.
 
 The following sample shows how to deal with the custom key class:
 
@@ -314,5 +322,13 @@ the BucketParamType that is just large enough but not too large if you don't wan
 memory and cache size. The memory size for this extra hot memory space will be slightly
 larger than `c * n` bits.
 
-More extra space is required for hash table expansion and reconstruction. In order to optimize the memory allocation time, we did not actively release these spaces, but these additional spaces can be released.
+For the fph meta hash table `fph::MetaFphSet` and `fph::MetaFphMap`, additional space is needed for
+the metadata. In the current codes, we use 1 byte metadata for each element, 1 bit for position
+marker and 7 bits for part of the hash. We can also choose 4 bits metadata for each element,
+but it turns out that the extra instructions needed for the 4-bits do not deserve the cache space
+they save in our tests.
+
+More extra space is required for hash table expansion and reconstruction. In order to optimize the
+memory allocation time, we did not actively release all of these spaces, but these additional
+spaces can be released.
 
