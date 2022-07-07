@@ -1,4 +1,5 @@
 #include "fph/dynamic_fph_table.h"
+#include "fph/meta_fph_table.h"
 #include <iostream>
 
 class TestKeyClass {
@@ -49,32 +50,30 @@ protected:
     fph::dynamic::RandomGenerator<std::string> string_gen;
 };
 
-void TestFphMap() {
-    using KeyType = TestKeyClass;
-    using MappedType = uint64_t;
-//    using SeedHash = TestKeySeedHash;
-    using Hash = TestKeyHash;
-    using Allocator = std::allocator<std::pair<const KeyType, MappedType>>;
-    using BucketParamType = uint32_t;
-    using KeyRNG = KeyClassRNG;
+template<class TestMap, class TestKeyClass>
+void SampleTest() {
+    TestMap fph_map = {{TestKeyClass("a"), 1}, {TestKeyClass("b"), 2}, {TestKeyClass("c"), 3},
+                       {TestKeyClass("d"), 4} };
 
-    using FphMap = fph::DynamicFphMap<KeyType, MappedType, Hash, std::equal_to<>, Allocator,
-                                        BucketParamType , KeyRNG>;
 
-    FphMap fph_map = {{TestKeyClass("a"), 1}, {TestKeyClass("b"), 2}, {TestKeyClass("c"), 3},
-                        {TestKeyClass("d"), 4} };
-
-    std::cout << "Fph map has elements: " << std::endl;
+    std::cout << "map has elements: " << std::endl;
     for (const auto& [k, v]: fph_map) {
         std::cout << "(" << k.data << ", " << v << ") ";
     }
     std::cout << std::endl;
 
     fph_map.insert({TestKeyClass("e"), 5});
+    auto &e_ref = fph_map.at(TestKeyClass("e"));
+    std::cout << "value at e is " << e_ref << std::endl;
     fph_map.template try_emplace<>(TestKeyClass("f"), 6);
+    const auto& f_ref = const_cast<const TestMap*>(&fph_map)->at(TestKeyClass("f"));
+    (void)0;
+    std::cout << "value at f is " << f_ref << std::endl;
     fph_map[TestKeyClass("g")] = 7;
     fph_map.erase(TestKeyClass("a"));
-    fph_map.erase(const_cast<const FphMap*>(&fph_map)->find(TestKeyClass("b")));
+    auto const_find_it = const_cast<const TestMap*>(&fph_map)->find(TestKeyClass("b"));
+    std::cout << "find key b value is " << const_find_it->second << std::endl;
+    fph_map.erase(const_find_it);
 
     std::cout << "Fph map now has elements: " << std::endl;
     for (const auto& [k, v]: fph_map) {
@@ -91,6 +90,30 @@ void TestFphMap() {
     std::cout << "Value with key \"g\" is "
               << fph_map.GetPointerNoCheck(TestKeyClass("g"))->second
               << std::endl;
+}
+
+void TestFphMap() {
+    using KeyType = TestKeyClass;
+    using MappedType = uint64_t;
+    using TestHash = TestKeyHash;
+    using Allocator = std::allocator<std::pair<const KeyType, MappedType>>;
+    using BucketParamType = uint32_t;
+    using KeyRNG = KeyClassRNG;
+
+    using DyFphMap = fph::DynamicFphMap<KeyType, MappedType, TestHash, std::equal_to<>, Allocator,
+                                        BucketParamType , KeyRNG>;
+    using FphMetaMap = fph::MetaFphMap<KeyType, MappedType, TestHash, std::equal_to<>, Allocator,
+            BucketParamType>;
+
+
+//    using TestMap = FphMetaMap;
+//    using TestMap = FphMap;
+    std::cout << "DynamicFphMap" << std::endl;
+    SampleTest<DyFphMap, TestKeyClass>();
+
+    std::cout << std::endl << "MetaFphMap" << std::endl;
+    SampleTest<FphMetaMap, TestKeyClass>();
+
 }
 
 int main() {

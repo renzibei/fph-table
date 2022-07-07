@@ -1,4 +1,5 @@
 #include "fph/dynamic_fph_table.h"
+#include "fph/meta_fph_table.h"
 #include "loghelper.h"
 
 #include <unordered_set>
@@ -17,6 +18,7 @@
 enum TableType {
     FCH_TABLE = 0,
     DYNAMIC_FPH_TABLE,
+    META_FPH_TABLE,
     STD_HASH_TABLE,
     ABSL_FLAT_TABLE,
     ROBIN_HOOD_FLAT_TABLE,
@@ -29,6 +31,8 @@ std::string GetTableName(TableType table_type) {
             return "fch_map";
         case DYNAMIC_FPH_TABLE:
             return "dynamic_fph_map";
+        case META_FPH_TABLE:
+            return "meta_fph_map";
         case STD_HASH_TABLE:
             return "std::unordered_map";
         case ABSL_FLAT_TABLE:
@@ -264,6 +268,7 @@ bool TestInsertCorrectness(Table &table, BenchTable &bench_table, PairVec &pair_
                     return false;
                 }
 
+                // comment out the following comparing when not in debug
 //                if (!IsTableSame<Table, BenchTable, GetKey, ValueEqual>(table, bench_table)) {
 //                    LogHelper::log(Error, "table not same during insert const&, pair_cnt: %lu", pair_cnt);
 //                    return false;
@@ -648,7 +653,7 @@ void ConstructTable(Table &table, const PairVec &pair_vec, size_t seed, double c
                 table.insert(pair);
             }
         }
-        if constexpr (table_type == DYNAMIC_FPH_TABLE) {
+        if constexpr (table_type == DYNAMIC_FPH_TABLE || table_type == META_FPH_TABLE) {
             if (do_rehash) {
                 if (table.load_factor() < 0.45) {
                     table.max_load_factor(0.9);
@@ -1136,7 +1141,7 @@ std::tuple<uint64_t, uint64_t> TestTableLookUp(Table &table, size_t lookup_time,
     std::uniform_int_distribution<size_t> random_dis;
     auto pair_vec = lookup_vec;
 
-    if constexpr(table_type == DYNAMIC_FPH_TABLE) {
+    if constexpr(table_type == DYNAMIC_FPH_TABLE || table_type == META_FPH_TABLE) {
         table.max_load_factor(max_load_factor);
     }
     ConstructTable<table_type, Table, PairVec, GetKey>(table, input_vec, random_dis(random_engine), c, true, false);
@@ -1187,7 +1192,7 @@ uint64_t TestTableConstruct(Table &table, const PairVec &pair_vec, size_t seed =
     (void)test_time;
     table.clear();
     auto begin_time = std::chrono::high_resolution_clock::now();
-    if constexpr (table_type == DYNAMIC_FPH_TABLE) {
+    if constexpr (table_type == DYNAMIC_FPH_TABLE || table_type == META_FPH_TABLE) {
         table.max_load_factor(max_load_factor);
     }
     ConstructTable<table_type>(table, pair_vec, seed, c, do_reserve, true);
@@ -1204,7 +1209,7 @@ template<TableType table_type, class Table, class PairVec,
         class GetKey = SimpleGetKey<typename PairVec::value_type> >
 std::tuple<uint64_t, uint64_t> TestTableIterate(Table &table, size_t iterate_time, const PairVec &input_vec,
                                                 size_t seed, double max_load_factor = 0.9, double c = 2.0) {
-    if constexpr(table_type == DYNAMIC_FPH_TABLE) {
+    if constexpr(table_type == DYNAMIC_FPH_TABLE || table_type == META_FPH_TABLE) {
         table.max_load_factor(max_load_factor);
     }
     ConstructTable<table_type, Table, PairVec, GetKey>(table, input_vec, seed, c);
@@ -1333,7 +1338,9 @@ void TestTablePerformance(size_t element_num, size_t construct_time, size_t look
 }
 
 
+
 void TestSet() {
+#if TEST_TABLE_CORRECT
     using KeyType = uint64_t;
 //    using KeyType = uint64_t*;
 //    using KeyType = std::string;
@@ -1343,20 +1350,27 @@ void TestSet() {
     using SeedHash = std::hash<KeyType>;
 //    using SeedHash = fph::MixSeedHash<KeyType>;
 //    using SeedHash = fph::StrongSeedHash<KeyType>;
-    using BucketParamType = uint32_t;
+//    using BucketParamType = uint32_t;
 
     using RandomKeyGenerator = fph::dynamic::RandomGenerator<KeyType>;
 //    using RandomKeyGenerator = KeyClassRNG;
 
-    fph::DynamicFphSet<KeyType, SeedHash, std::equal_to<>,
-    std::allocator<KeyType>, BucketParamType, RandomKeyGenerator> dy_fph_set;
+//    fph::DynamicFphSet<KeyType, SeedHash, std::equal_to<>,
+//    std::allocator<KeyType>, BucketParamType, RandomKeyGenerator> dy_fph_set;
 
-    using DyFphFphSet7bit = fph::DynamicFphSet<KeyType,  SeedHash, std::equal_to<>,
+    using DyFphSet7bit = fph::DynamicFphSet<KeyType,  SeedHash, std::equal_to<>,
     std::allocator<KeyType>, uint8_t, RandomKeyGenerator>;
-    using DyFphFphSet15bit = fph::DynamicFphSet<KeyType, SeedHash, std::equal_to<>,
+    using DyFphSet15bit = fph::DynamicFphSet<KeyType, SeedHash, std::equal_to<>,
     std::allocator<KeyType>, uint16_t, RandomKeyGenerator>;
-    using DyFphFphSet31bit = fph::DynamicFphSet<KeyType, SeedHash, std::equal_to<>,
+    using DyFphSet31bit = fph::DynamicFphSet<KeyType, SeedHash, std::equal_to<>,
     std::allocator<KeyType>, uint32_t, RandomKeyGenerator>;
+
+    using MetaFphSet7bit = fph::MetaFphSet<KeyType, SeedHash, std::equal_to<>,
+            std::allocator<KeyType>, uint8_t>;
+    using MetaFphSet15bit = fph::MetaFphSet<KeyType, SeedHash, std::equal_to<>,
+            std::allocator<KeyType>, uint16_t>;
+    using MetaFphSet31bit = fph::MetaFphSet<KeyType, SeedHash, std::equal_to<>,
+            std::allocator<KeyType>, uint32_t>;
 
     //    using HashMethod = robin_hood::hash<KeyType>;
 //    using HashMethod = absl::Hash<KeyType>;
@@ -1369,44 +1383,84 @@ void TestSet() {
 //    using BenchTable = absl::flat_hash_set<KeyType, HashMethod>;
     using BenchTable = std::unordered_set<KeyType, HashMethod>;
 
-#if TEST_TABLE_CORRECT
+
     {
-        auto max_load_factor_upper_limit = DyFphFphSet7bit::max_load_factor_upper_limit();
-        if (TestCorrectness<RandomKeyGenerator, DyFphFphSet7bit, BenchTable>(128 * max_load_factor_upper_limit,
-                                                                          4000)) {
-            LogHelper::log(Info, "Pass DyFphFphSet7Bit test with %d keys", size_t(128 * max_load_factor_upper_limit));
+
+        auto meta_max_load_factor_upper_limit = MetaFphSet7bit::max_load_factor_upper_limit();
+        if (TestCorrectness<RandomKeyGenerator, MetaFphSet7bit , BenchTable>(128 * meta_max_load_factor_upper_limit,
+                                                                             4000)) {
+            LogHelper::log(Info, "Pass MetaFphSet7Bit test with %d keys", size_t(128 * meta_max_load_factor_upper_limit));
         }
         else {
-            LogHelper::log(Error, "Fail in DyFphFphSet7Bit test");
+            LogHelper::log(Error, "Fail in MetaFphSet7Bit test");
             return;
         }
 
-        if (TestCorrectness<RandomKeyGenerator, DyFphFphSet15bit, BenchTable>(3000,
+        if (TestCorrectness<RandomKeyGenerator, MetaFphSet15bit, BenchTable>(3000,
+                                                                             400)) {
+            LogHelper::log(Info, "Pass MetaFphSet15Bit test with %d keys", 3000);
+        }
+        else {
+            LogHelper::log(Error, "Fail in MetaFphSet15Bit test");
+            return;
+        }
+
+        if (TestCorrectness<RandomKeyGenerator, MetaFphSet15bit, BenchTable>(65536 / 2 * TEST_CORR_MAX_LOAD_FACTOR,
+                                                                             10)) {
+            LogHelper::log(Info, "Pass MetaFphSet15Bit test with %d keys", size_t(65536 / 2 * TEST_CORR_MAX_LOAD_FACTOR));
+        }
+        else {
+            LogHelper::log(Error, "Fail in MetaFphSet15Bit test");
+            return;
+        }
+        if (TestCorrectness<RandomKeyGenerator, MetaFphSet31bit, BenchTable>(500000ULL,
+                                                                             3)) {
+            LogHelper::log(Info, "Pass MetaFphSet31Bit test with %d keys", 500000ULL);
+        }
+        else {
+            LogHelper::log(Error, "Fail in MetaFphSet31Bit test");
+            return;
+        }
+
+        auto max_load_factor_upper_limit = DyFphSet7bit::max_load_factor_upper_limit();
+        if (TestCorrectness<RandomKeyGenerator, DyFphSet7bit, BenchTable>(128 * max_load_factor_upper_limit,
+                                                                          4000)) {
+            LogHelper::log(Info, "Pass DyFphSet7Bit test with %d keys", size_t(128 * max_load_factor_upper_limit));
+        }
+        else {
+            LogHelper::log(Error, "Fail in DyFphSet7Bit test");
+            return;
+        }
+
+        if (TestCorrectness<RandomKeyGenerator, DyFphSet15bit, BenchTable>(3000,
                                                                        400)) {
-            LogHelper::log(Info, "Pass DyFphFphSet15Bit test with %d keys", 3000);
+            LogHelper::log(Info, "Pass DyFphSet15Bit test with %d keys", 3000);
         }
         else {
-            LogHelper::log(Error, "Fail in DyFphFphSet15Bit test");
+            LogHelper::log(Error, "Fail in DyFphSet15Bit test");
             return;
         }
-//
-        if (TestCorrectness<RandomKeyGenerator, DyFphFphSet15bit, BenchTable>(65536 / 2 * TEST_CORR_MAX_LOAD_FACTOR,
+
+        if (TestCorrectness<RandomKeyGenerator, DyFphSet15bit, BenchTable>(65536 / 2 * TEST_CORR_MAX_LOAD_FACTOR,
                                                                        10)) {
-            LogHelper::log(Info, "Pass DyFphFphSet15Bit test with %d keys", size_t(65536 / 2 * TEST_CORR_MAX_LOAD_FACTOR));
+            LogHelper::log(Info, "Pass DyFphSet15Bit test with %d keys", size_t(65536 / 2 * TEST_CORR_MAX_LOAD_FACTOR));
         }
         else {
-            LogHelper::log(Error, "Fail in DyFphFphSet15Bit test");
+            LogHelper::log(Error, "Fail in DyFphSet15Bit test");
             return;
         }
-////
-        if (TestCorrectness<RandomKeyGenerator, DyFphFphSet31bit, BenchTable>(500000ULL,
+
+        if (TestCorrectness<RandomKeyGenerator, DyFphSet31bit, BenchTable>(500000ULL,
                                                                        3)) {
-            LogHelper::log(Info, "Pass DyFphFphSet31Bit test with %d keys", 500000ULL);
+            LogHelper::log(Info, "Pass DyFphSet31Bit test with %d keys", 500000ULL);
         }
         else {
-            LogHelper::log(Error, "Fail in DyFphFphSet31Bit test");
+            LogHelper::log(Error, "Fail in DyFphSet31Bit test");
             return;
         }
+
+
+
     };
 #endif
 
@@ -1426,6 +1480,7 @@ struct FixSizeStruct {
 
 
 void TestFPH() {
+#if TEST_TABLE_CORRECT
     using KeyType = uint32_t;
 //    using KeyType = TestKeyClass;
 //    using KeyType = std::string;
@@ -1460,13 +1515,17 @@ void TestFPH() {
     std::allocator<std::pair<const KeyType, ValueType>>, uint8_t, KeyRandomGen>;
     using DyFphMap15bit = fph::DynamicFphMap<KeyType, ValueType, SeedHash, std::equal_to<>,
     std::allocator<std::pair<const KeyType, ValueType>>, uint16_t, KeyRandomGen>;
-
-
-
     using DyFphMap31bit = fph::DynamicFphMap<KeyType, ValueType, SeedHash, std::equal_to<>,
     std::allocator<std::pair<const KeyType, ValueType>>, uint32_t, KeyRandomGen>;
 //    using DyFphMap63bit = fph::DynamicFphMap<KeyType, ValueType, SeedHash, std::equal_to<>,
 //    std::allocator<std::pair<const KeyType, ValueType>>, uint64_t, KeyRandomGen>;
+
+    using MetaFphMap7bit = fph::MetaFphMap<KeyType, ValueType, SeedHash, std::equal_to<>,
+            std::allocator<std::pair<const KeyType, ValueType>>, uint8_t>;
+    using MetaFphMap15bit = fph::MetaFphMap<KeyType, ValueType, SeedHash, std::equal_to<>,
+            std::allocator<std::pair<const KeyType, ValueType>>, uint16_t>;
+    using MetaFphMap31bit = fph::MetaFphMap<KeyType, ValueType, SeedHash, std::equal_to<>,
+            std::allocator<std::pair<const KeyType, ValueType>>, uint32_t>;
 
     static_assert(is_pair<typename DyFphMap7bit::value_type>::value);
 
@@ -1484,8 +1543,9 @@ void TestFPH() {
 //    using SkaFlatTable = ska::flat_hash_map<KeyType, ValueType, HashMethod>;
 
 
-    LogHelper::log(Debug, "sizeof DyFphMap15bit is %lu, sizeof StdHashTable is %lu",
-                   sizeof(DyFphMap15bit), sizeof(StdHashTable));
+    LogHelper::log(Debug, "sizeof DyFphMap15bit is %lu, sizeof MetaFphMap15bit is %lu, "
+                          "sizeof StdHashTable is %lu",
+                   sizeof(DyFphMap15bit), sizeof(MetaFphMap15bit), sizeof(StdHashTable));
 
 //    absl::flat_hash_map<KeyType, ValueType, HashMethod> absl_map;
 //    robin_hood::unordered_flat_map<KeyType, ValueType, HashMethod> robin_hood_map;
@@ -1499,7 +1559,56 @@ void TestFPH() {
 
 
 
-#if TEST_TABLE_CORRECT
+
+    {
+        auto max_load_factor_upper_limit = MetaFphMap7bit::max_load_factor_upper_limit();
+        bool correct_test_ret;
+
+        size_t test_element_up_bound = std::floor(128.0 * max_load_factor_upper_limit);
+        correct_test_ret = TestCorrectness<RandomGenerator, MetaFphMap7bit, BenchTable>
+                (test_element_up_bound, 4000);
+        if (!correct_test_ret) {
+            LogHelper::log(Error, "MetaFphMap7bit Fail to pass correct test with %lu max elements",
+                           test_element_up_bound);
+            return;
+        } else {
+            LogHelper::log(Info, "MetaFphMap7bit Pass correctness test  with %lu max elements",
+                           test_element_up_bound);
+        }
+
+        test_element_up_bound = 3000;
+        correct_test_ret = TestCorrectness<RandomGenerator, MetaFphMap15bit, BenchTable>(test_element_up_bound, 400);
+        if (!correct_test_ret) {
+            LogHelper::log(Error, "MetaFphMap15bit Fail to pass correct test with %lu max elements",
+                           test_element_up_bound);
+            return;
+        } else {
+            LogHelper::log(Info, "MetaFphMap15bit Pass correctness test  with %lu max elements",
+                           test_element_up_bound);
+        }
+
+        test_element_up_bound = std::floor(65536.0 / 2.0 * TEST_CORR_MAX_LOAD_FACTOR);
+        correct_test_ret = TestCorrectness<RandomGenerator, MetaFphMap15bit, BenchTable>(test_element_up_bound, 10);
+        if (!correct_test_ret) {
+            LogHelper::log(Error, "MetaFphMap15bit Fail to pass correct test with %lu max elements",
+                           test_element_up_bound);
+            return;
+        } else {
+            LogHelper::log(Info, "MetaFphMap15bit Pass correctness test with %lu max elements",
+                           test_element_up_bound);
+        }
+
+        test_element_up_bound = 500000ULL;
+        correct_test_ret = TestCorrectness<RandomGenerator, MetaFphMap31bit, BenchTable>(test_element_up_bound, 1);
+        if (!correct_test_ret) {
+            LogHelper::log(Error, "MetaFphMap31bit Fail to pass correct test with %lu max elements",
+                           test_element_up_bound);
+            return;
+        } else {
+            LogHelper::log(Info, "MetaFphMap31bit Pass correctness test with %lu max elements",
+                           test_element_up_bound);
+        }
+    }
     {
         auto max_load_factor_upper_limit = DyFphMap7bit::max_load_factor_upper_limit();
         bool correct_test_ret;
@@ -1549,6 +1658,7 @@ void TestFPH() {
                            test_element_up_bound);
         }
     }
+
 #endif
 
 
@@ -1581,17 +1691,24 @@ void TestMapPerformance() {
     using Allocator = std::allocator<std::pair<const KeyType, ValueType>>;
 
     using PairType = std::pair<KeyType, ValueType>;
-    constexpr size_t KEY_NUM = 84100ULL;
-//    constexpr size_t KEY_NUM = 100000000ULL;
+//    constexpr size_t KEY_NUM = 84100ULL;
+    constexpr size_t KEY_NUM = 1'000'000ULL;
     constexpr size_t LOOKUP_TIME = 100000000ULL;
-    constexpr size_t CONSTRUCT_TIME = 5;
+    constexpr size_t CONSTRUCT_TIME = 2;
     constexpr double TEST_MAX_LOAD_FACTOR = 0.6;
 
     constexpr double c = 2.0;
 
-    using TestPerformanceDyFphMap = fph::DynamicFphMap<KeyType, ValueType, SeedHash, std::equal_to<>, Allocator, BucketParamType, KeyRandomGen>;
+    using TestMetaFphMap = fph::MetaFphMap<KeyType, ValueType, SeedHash, std::equal_to<>, Allocator,
+        BucketParamType>;
 
-    static_assert(is_pair<typename TestPerformanceDyFphMap::value_type>::value);
+    using TestDyFphMap = fph::DynamicFphMap<KeyType, ValueType, SeedHash, std::equal_to<>,
+            Allocator, BucketParamType, KeyRandomGen>;
+
+//    using TestPerformanceMap = TestMetaFphMap;
+//    using TestPerformanceMap = TestDyFphMap;
+
+//    static_assert(is_pair<typename TestPerformanceMap::value_type>::value);
 
 
 
@@ -1604,8 +1721,10 @@ void TestMapPerformance() {
 
     size_t performance_seed = std::random_device{}();
 
-    TestTablePerformance<DYNAMIC_FPH_TABLE, RandomGenerator, TestPerformanceDyFphMap, PairType>(KEY_NUM, CONSTRUCT_TIME, LOOKUP_TIME,
+    TestTablePerformance<DYNAMIC_FPH_TABLE, RandomGenerator, TestDyFphMap, PairType>(KEY_NUM, CONSTRUCT_TIME, LOOKUP_TIME,
                                                                                                 performance_seed, c, TEST_MAX_LOAD_FACTOR);
+    TestTablePerformance<META_FPH_TABLE, RandomGenerator, TestMetaFphMap , PairType>(KEY_NUM, CONSTRUCT_TIME, LOOKUP_TIME,
+                                                                                     performance_seed, c, TEST_MAX_LOAD_FACTOR);
 
 
 

@@ -3,10 +3,10 @@
 The Flash Perfect Hash (FPH) library is a modern C++ implementation of a dynamic [perfect hash](https://en.wikipedia.org/wiki/Perfect_hash_function)
 table (no collisions for the hash), which makes the hash map/set extremely fast for lookup operations.
 
-We provide two container classes `fph::DynamicFphSet` and `fph::DynamicFphMap`. The APIs of these two
-classes are almost the same as those of `std::unordered_set` and `std::unordered_map`, but there are some
-minor differences, which we will explain in detail below. To compile this code, you need
-to use at least C++17 or newer standards.
+We provide four container classes `fph::DynamicFphSet`,`fph::DynamicFphMap`,`fph::MetaFphSet` and
+`fph::MetaFphMap`. The APIs of these four classes are almost the same as those of
+`std::unordered_set` and `std::unordered_map`, but there are some minor differences, which we will
+explain in detail below. To compile this code, you need to use at least C++17 or newer standards.
 
 Generally speaking, the containers here are suitable for the situation where the performance of the
 lookup is very important, and the number of insertions is small compared to the query, or the keys are fixed.
