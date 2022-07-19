@@ -69,13 +69,28 @@ the hash no longer a perfect hash, we will rebuild the hash table.
 
 ## Difference compared to std
 1. The template parameter `SeedHash` is different from the `Hash` in STL, it has to be a functor
-   accept two arguments: both the key and the seed. (There is also a no-seed version hash table).
+   accept two arguments: both the key and the seed.
+(There is also a no-seed version hash table, see following content).
 2. For `fph::DynamicFphSet` and `fph::DynamicFphMap`, if the key type is not a common type, you will have to provide a random generator for the key
    with the template parameter `RandomKeyGenerator`. There is no such requirement for
    `fph::MetaFphSet` and `fph::MetaFphMap`.
 3. The keys have to be CopyConstructible.
 4. The values have to be MoveConstructible.
 5. May invalidates any references and pointers to elements within the table after rehash.
+
+The second difference is because we use a trick in `fph::DynamicFphSet` and
+`fph::DynamicFphMap`. Normally, we need to know whether a slot is empty in hash
+table. Of course, we can use a bit array to indicate this information, but this
+will introduce extra memory load operations. So, we randomly
+generate a default key to fill the
+empty slots. How can we know whether this slot is empty when the user inserts
+the default key? We place a secondary default key in the position of the
+original slot belonging to the default key, and we make sure that the theory
+slot position of this secondary default key is different from that of the
+default key.
+
+As we use metadata to indicate whether the slots are empty in `fph::MetaFphSet`
+and `fph::MetaFphMap`, they don't need a random key generator anymore.
 
 ## No seed hash version
 The normal version of fph table requires a seed hash function. There exists a no-seed version where
@@ -254,11 +269,12 @@ We provide three kinds of SeedHash function for basic types: `fph::SimpleSeedHas
 The SimpleSeedHash has the fastest calculation speed and the weakest hash distribution, while the
 StrongSeedHash is the slowest of them to calculate but has the best distribution of hash value.
 The MixSeedHash is in the mid of them.
+
 Take integer for an example, if the keys you want to insert are not uniformly distributed in
 the integer interval of that type, then the hash value may probably not be uniformly distributed
 in the hash type interval as well for a weak hash function. But with a strong hash function,
 you can easily produce uniformly distributed hash values regardless of your input distribution.
- The default Seed Hash function is the `fph::SimpleSeedHash<T>` as it is
+The default Seed Hash function is the `fph::SimpleSeedHash<T>` as it is
 the fastest, and it is good enough for most of the input data in real life.
 
 Tips: Know the patterns of the input keys before choosing the seed hash function. If the keys may
@@ -277,9 +293,11 @@ Compared to the seed version, the no-seed version hash table does not require a 
 hash table in this version requires the same `Hash` function that the STL unordered containers use.
 However, there is a requirement for the no-seed hash function: all the actually inserted elements
 have different hash values. Similar to the requirement of the seed hash function, this is easy for
-64-bit keys, identity hash is good enough as a hash function for this hash table. And if the length
+64-bit keys. Identity hash is good enough as a hash function for this hash table. And if the length
 of the key exceeds 64 bits and the size of hash value is 64 bits, then there is a possibility of
-collision.
+collision. So we strongly recommend using the seeded version of the fph table when the key_type
+is string.
+
 You can switch to the no seed version by change to the `noseed` branch.
 ```
 git checkout noseed
