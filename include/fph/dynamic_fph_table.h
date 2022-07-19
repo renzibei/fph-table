@@ -1198,7 +1198,7 @@ namespace fph {
             size_t init_seed;
 
         protected:
-            std::minstd_rand random_engine;
+            std::mt19937_64 random_engine;
             std::uniform_int_distribution<uint32_t> random_gen;
         };
 
