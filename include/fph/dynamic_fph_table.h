@@ -687,7 +687,7 @@ namespace fph {
 
         template<class CharT>
         struct SimpleSeedHash<std::basic_string_view<CharT>> {
-            size_t operator()(const std::basic_string_view<CharT> &str, size_t seed) const noexcept {
+            size_t operator()(std::basic_string_view<CharT> str, size_t seed) const noexcept {
                 return dynamic::detail::HashBytes(str.data(), sizeof(CharT) * str.length(), seed);
             }
         };
@@ -743,7 +743,7 @@ namespace fph {
 
         template<class CharT>
         struct MixSeedHash<std::basic_string_view<CharT>> {
-            size_t operator()(const std::basic_string_view<CharT> &str, size_t seed) const {
+            size_t operator()(std::basic_string_view<CharT> str, size_t seed) const {
                 return dynamic::detail::HashBytes(str.data(), sizeof(CharT) * str.length(), seed);
             }
         };
@@ -799,7 +799,7 @@ namespace fph {
 
         template<class CharT>
         struct StrongSeedHash<std::basic_string_view<CharT>> {
-            size_t operator()(const std::basic_string_view<CharT> &str, size_t seed) const noexcept {
+            size_t operator()(std::basic_string_view<CharT> str, size_t seed) const noexcept {
                 return dynamic::detail::HashBytes(str.data(), sizeof(CharT) * str.length(), seed);
             }
         };
@@ -1304,12 +1304,40 @@ namespace fph {
 
         };
 
-    } // namespace detail
+    } // namespace dynamic::detail
 
     namespace dynamic::detail {
 
-        template<class Policy, class Hash, class KeyEqual, class Allocator, class BucketParamType,
-                class RandomKeyGenerator>
+        // For Heterogeneous lookup
+        // https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2019/p1690r0.html
+
+        template<typename... Ts> struct make_void { typedef void type;};
+        template<typename... Ts> using void_t = typename make_void<Ts...>::type;
+
+        template <class, class = void>
+        struct IsTransparent : std::false_type {};
+        template <class T>
+        struct IsTransparent<T, void_t<typename T::is_transparent>>
+        : std::true_type {};
+
+        template <bool is_transparent>
+        struct KeyArg {
+            // Transparent. Forward `K`.
+            template <typename K, typename key_type>
+            using type = K;
+        };
+
+        template <>
+        struct KeyArg<false> {
+            // Not transparent. Always use `key_type`.
+            template <typename K, typename key_type>
+            using type = key_type;
+        };
+
+
+
+        template<class Policy, class Hash, class KeyEqual, class Allocator,
+                class BucketParamType, class RandomKeyGenerator>
         class DynamicRawSet {
         public:
 
@@ -1332,6 +1360,12 @@ namespace fph {
             using const_iterator = ConstForwardIterator<DynamicRawSet, typename Policy::slot_type>;
             friend const_iterator;
 #endif
+        private:
+            using KeyArgImpl = KeyArg<IsTransparent<key_equal>::value
+                    && IsTransparent<hasher>::value>;
+        public:
+            template <class K>
+            using key_arg = typename KeyArgImpl::template type<K, key_type>;
 
             explicit DynamicRawSet(size_type bucket_count, const Hash& hash = Hash(),
                                    const key_equal& equal = key_equal(),
@@ -1752,7 +1786,9 @@ namespace fph {
                 return end();
             }
 
-            FPH_ALWAYS_INLINE iterator find(const key_type& FPH_RESTRICT key) FPH_FUNC_RESTRICT noexcept {
+            template<class K = key_type>
+            FPH_ALWAYS_INLINE iterator find(const key_arg<K>&
+                            FPH_RESTRICT key) FPH_FUNC_RESTRICT noexcept {
                 auto slot_pos = GetSlotPos(key);
                 slot_type *pair_address = slot_ + slot_pos;
                 if FPH_LIKELY(key_equal_(pair_address->key, key)) {
@@ -1761,7 +1797,9 @@ namespace fph {
                 return end();
             }
 
-            FPH_ALWAYS_INLINE const_iterator find(const key_type& FPH_RESTRICT key) const FPH_FUNC_RESTRICT noexcept {
+            template<class K = key_type>
+            FPH_ALWAYS_INLINE const_iterator find(const key_arg<K>&
+                        FPH_RESTRICT key) const FPH_FUNC_RESTRICT noexcept {
                 auto slot_pos = GetSlotPos(key);
                 slot_type *pair_address = slot_ + slot_pos;
                 if FPH_LIKELY(key_equal_(pair_address->key, key)) {
@@ -1770,11 +1808,6 @@ namespace fph {
                 return end();
             }
 
-            // TODO: support transparent key
-//            template<class K>
-//            iterator find(const K &x) {
-//
-//            }
 
 #endif
 
@@ -1848,17 +1881,19 @@ namespace fph {
                 }
             }
 
-            size_t count(const key_type &key) const {
+            template<class K = key_type>
+            size_t count(const key_arg<K> &key) const {
                 auto pos = GetSlotPos(key);
-                if (key_equal_(key, slot_[pos].key)) {
+                if (key_equal_(slot_[pos].key, key)) {
                     return 1U;
                 }
                 return 0U;
             }
 
-            bool contains(const key_type& key ) const {
+            template<class K = key_type>
+            bool contains(const key_arg<K>& key ) const {
                 auto pos = GetSlotPos(key);
-                if (key_equal_(key, slot_[pos].key)) {
+                if (key_equal_(slot_[pos].key, key)) {
                     return true;
                 }
                 return false;
@@ -1868,7 +1903,8 @@ namespace fph {
                 return contains(slot_type::GetSlotAddressByValueAddress(std::addressof(ele))->key);
             }
 
-            std::pair<iterator,iterator> equal_range( const key_type& key ) {
+            template<class K = key_type>
+            std::pair<iterator,iterator> equal_range( const key_arg<K>& key ) {
                 auto it = find(key);
                 if (it != end()) {
                     return {it, std::next(it)};
@@ -1876,7 +1912,9 @@ namespace fph {
                 return {it, it};
             }
 
-            std::pair<const_iterator,const_iterator> equal_range( const key_type& key ) const {
+            template<class K = key_type>
+            std::pair<const_iterator,const_iterator> equal_range(
+                    const key_arg<K>& key ) const {
                 auto it = find(key);
                 if (it != end()) {return {it, std::next(it)};}
                 return {it, it};
@@ -1921,13 +1959,17 @@ namespace fph {
              * @param key
              * @return
              */
-            FPH_ALWAYS_INLINE pointer GetPointerNoCheck(const key_type& FPH_RESTRICT key)
+            template<class K = key_type>
+            FPH_ALWAYS_INLINE pointer GetPointerNoCheck(const key_arg<K>&
+                    FPH_RESTRICT key)
             FPH_FUNC_RESTRICT noexcept {
                 size_t pos = GetSlotPos(key);
                 return std::addressof(slot_[pos].value);
             }
 
-            FPH_ALWAYS_INLINE const_pointer GetPointerNoCheck(const key_type& FPH_RESTRICT key)
+            template<class K = key_type>
+            FPH_ALWAYS_INLINE const_pointer GetPointerNoCheck(const key_arg<K>&
+                    FPH_RESTRICT key)
             const FPH_FUNC_RESTRICT noexcept {
                 size_t pos = GetSlotPos(key);
                 return std::addressof(slot_[pos].value);
@@ -1935,11 +1977,13 @@ namespace fph {
 
 
             /**
-             * Get the position in the underlying slot of one key
+             *
+             * @tparam K
              * @param key
              * @return
              */
-            FPH_ALWAYS_INLINE size_t GetSlotPos(const key_type &key) const FPH_FUNC_RESTRICT noexcept {
+            template<class K = key_type>
+            FPH_ALWAYS_INLINE size_t GetSlotPos(const key_arg<K> &key) const FPH_FUNC_RESTRICT noexcept {
                 auto k_seed0_hash = hash_(key);
                 size_t bucket_index = GetBucketIndex(k_seed0_hash);
                 auto bucket_param = bucket_p_array_[bucket_index];
@@ -1973,7 +2017,8 @@ namespace fph {
                 return slot_pos;
             }
 
-            FPH_ALWAYS_INLINE size_t GetSlotPos(const key_type &key, size_t offset, size_t optional_bit)
+            template<class K = key_type>
+            FPH_ALWAYS_INLINE size_t GetSlotPos(const key_arg<K> &key, size_t offset, size_t optional_bit)
             const FPH_FUNC_RESTRICT noexcept {
                 auto k_seed0_hash = hash_(key);
                 auto temp_hash_value = MidHash(k_seed0_hash, MixSeedAndBit(seed2_, optional_bit));
@@ -2676,7 +2721,6 @@ namespace fph {
                 }
                 return ret;
             }
-
 
 
             std::pair<slot_type*, bool> FindOrAlloc(const key_type& key) {
@@ -3622,9 +3666,9 @@ namespace fph {
         }; // class raw set
 
 
-    } // namespace detail
+    } // namespace dynamic detail
 
-    namespace detail {
+    namespace dynamic::detail {
 
         template<class T>
         union DynamicSetSlotType {
@@ -3718,7 +3762,7 @@ namespace fph {
 //            using index_map_policy = LowBitsIndexMapPolicy;
         };
 
-    } // namespace detail
+    } // namespace dynamic::detail
 
     /**
      * The dynamic perfect hash set container
@@ -3735,7 +3779,8 @@ namespace fph {
             class Allocator = std::allocator<Key>,
             class BucketParamType = uint32_t,
             class RandomKeyGenerator = dynamic::RandomGenerator<Key> >
-    class DynamicFphSet: public dynamic::detail::DynamicRawSet<detail::DynamicFphSetPolicy<Key>,
+    class DynamicFphSet: public dynamic::detail::DynamicRawSet<
+            dynamic::detail::DynamicFphSetPolicy<Key>,
             Hash, KeyEqual, Allocator, BucketParamType, RandomKeyGenerator> {
         using Base = typename DynamicFphSet::DynamicRawSet;
     public:
@@ -3748,7 +3793,15 @@ namespace fph {
 
     };
 
-    namespace detail {
+    template<class Key, class SeedHash = SimpleSeedHash<Key>,
+            class KeyEqual = std::equal_to<Key>,
+            class Allocator = std::allocator<Key>,
+            class BucketParamType = uint32_t,
+            class RandomKeyGenerator = dynamic::RandomGenerator<Key> >
+    using dynamic_fph_set = DynamicFphSet<Key, SeedHash, KeyEqual, Allocator,
+                                BucketParamType, RandomKeyGenerator>;
+
+    namespace dynamic::detail {
 
         namespace memory {
 
@@ -3839,7 +3892,7 @@ namespace fph {
             using index_map_policy = HighBitsIndexMapPolicy;
         };
 
-    } // namespace detail
+    } // namespace dynamic detail
 
     /**
      * The dynamic perfect hash map container
@@ -3858,9 +3911,12 @@ namespace fph {
             class BucketParamType = uint32_t,
             class RandomKeyGenerator = fph::dynamic::RandomGenerator<Key>
     >
-    class DynamicFphMap : public dynamic::detail::DynamicRawSet<detail::DynamicFphMapPolicy<Key, T>,
-            Hash, KeyEqual, Allocator, BucketParamType, RandomKeyGenerator> {
+    class DynamicFphMap : public dynamic::detail::DynamicRawSet<
+        dynamic::detail::DynamicFphMapPolicy<Key, T>,
+        Hash, KeyEqual, Allocator, BucketParamType, RandomKeyGenerator> {
         using Base = typename DynamicFphMap::DynamicRawSet;
+        template<class K>
+        using key_arg = typename Base::template key_arg<K>;
     public:
 
         using mapped_type = T;
@@ -3869,8 +3925,6 @@ namespace fph {
 
         using iterator = typename Base::iterator;
         using key_type = typename Base::key_type;
-
-
 
         using Base::find;
 
@@ -3886,18 +3940,20 @@ namespace fph {
 
         template<class... Args>
         std::pair<iterator, bool> try_emplace(key_type&& k, Args&&... args) {
-            return this-> template TryEmplaceImp<>(std::move(k), std::forward<Args>(args)...);
+            return this-> template TryEmplaceImp<>(std::move(k),
+                    std::forward<Args>(args)...);
         }
 
-        T& operator[] (const Key &key) {
+        T& operator[] (const key_type &key) {
             return this->try_emplace(key).first->second;
         }
 
-        T& operator[] (Key&& key) {
+        T& operator[] (key_type&& key) {
             return this->try_emplace(std::move(key)).first->second;
         }
 
-        const T& operator[] (const Key &key) const noexcept {
+        template<class K = key_type>
+        const T& operator[] (const key_arg<K> &key) const noexcept {
             return this->GetPointerNoCheck(key)->second;
         }
 
@@ -3925,6 +3981,15 @@ namespace fph {
 
     protected:
     };
+
+    template <class Key, class T,
+            class SeedHash = SimpleSeedHash<Key>,
+            class KeyEqual = std::equal_to<Key>,
+            class Allocator = std::allocator<std::pair<const Key, T>>,
+            class BucketParamType = uint32_t,
+            class RandomKeyGenerator = fph::dynamic::RandomGenerator<Key> >
+    using dynamic_fph_map = DynamicFphMap<Key, T, SeedHash, KeyEqual, Allocator,
+                            BucketParamType, RandomKeyGenerator>;
 
 
 } // namespace fph

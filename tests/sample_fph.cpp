@@ -1,6 +1,9 @@
 #include "fph/dynamic_fph_table.h"
 #include "fph/meta_fph_table.h"
 #include <iostream>
+#include <string_view>
+
+using namespace std::literals;
 
 class TestKeyClass {
 
@@ -22,16 +25,64 @@ public:
 
 };
 
+
+struct TestKeyEqualTo {
+    using is_transparent = void;
+    using eq_type = std::equal_to<std::string_view>;
+    bool operator()(const TestKeyClass& a, const std::string& b) const {
+        return eq_type{}(a.data, b);
+    }
+    bool operator()(const TestKeyClass& a, std::string_view b) const {
+        return eq_type{}(a.data, b);
+    }
+    bool operator()(const TestKeyClass& a, const TestKeyClass& b) const {
+        return eq_type{}(a.data, b.data);
+    }
+    bool operator()(const TestKeyClass& a, const char* b) const {
+        return eq_type{}(a.data, b);
+    }
+};
+
 // The hash function of the custom key type need to take both a key and a seed
 struct TestKeySeedHash {
+    using is_transparent = void;
+    using hash_type = fph::SimpleSeedHash<std::string_view>;
+
     size_t operator()(const TestKeyClass &src, size_t seed) const {
-        return fph::MixSeedHash<std::string>{}(src.data, seed);
+        return hash_type{}(src.data, seed);
+    }
+
+    size_t operator()(const std::string& src, size_t seed) const {
+        return hash_type{}(src, seed);
+    }
+
+    size_t operator()(std::string_view src, size_t seed) const {
+        return hash_type{}(src, seed);
+    }
+
+    size_t operator()(const char* src, size_t seed) const {
+        return hash_type{}(src, seed);
     }
 };
 
 struct TestKeyHash {
+    using is_transparent = void;
+    using hash_type = std::hash<std::string_view>;
+
+    size_t operator()(const std::string& key) const {
+        return hash_type{}(key);
+    }
+
     size_t operator()(const TestKeyClass &src) const {
-        return std::hash<std::string>{}(src.data);
+        return hash_type{}(src.data);
+    }
+
+    size_t operator()(std::string_view key) const {
+        return hash_type{}(key);
+    }
+
+    size_t operator()(const char* src) const {
+        return hash_type{}(src);
     }
 };
 
@@ -70,10 +121,22 @@ void SampleTest() {
     (void)0;
     std::cout << "value at f is " << f_ref << std::endl;
     fph_map[TestKeyClass("g")] = 7;
+
     fph_map.erase(TestKeyClass("a"));
     auto const_find_it = const_cast<const TestMap*>(&fph_map)->find(TestKeyClass("b"));
     std::cout << "find key b value is " << const_find_it->second << std::endl;
     fph_map.erase(const_find_it);
+    {
+        auto temp_find_it = fph_map.find("c"sv);
+        if (temp_find_it != fph_map.end()) {
+            std::cout << "find value at c is " << temp_find_it->second <<
+            std::endl;
+        }
+    }
+    if (fph_map.contains("d"s)) {
+        std::cout << "contains d in table" << std::endl;
+    }
+    std::cout << "count elements with key e: " << fph_map.count("e") << std::endl;
 
     std::cout << "Fph map now has elements: " << std::endl;
     for (const auto& [k, v]: fph_map) {
@@ -90,24 +153,29 @@ void SampleTest() {
     std::cout << "Value with key \"g\" is "
               << fph_map.GetPointerNoCheck(TestKeyClass("g"))->second
               << std::endl;
+
+    fph_map.clear();
+
+    if (fph_map.empty()) {
+        std::cout << "table is empty\n";
+    }
 }
 
 void TestFphMap() {
     using KeyType = TestKeyClass;
     using MappedType = uint64_t;
     using TestHash = TestKeyHash;
+    using KeyEqual = TestKeyEqualTo;
     using Allocator = std::allocator<std::pair<const KeyType, MappedType>>;
     using BucketParamType = uint32_t;
     using KeyRNG = KeyClassRNG;
 
-    using DyFphMap = fph::DynamicFphMap<KeyType, MappedType, TestHash, std::equal_to<>, Allocator,
+
+    using DyFphMap = fph::DynamicFphMap<KeyType, MappedType, TestHash, KeyEqual, Allocator,
                                         BucketParamType , KeyRNG>;
-    using FphMetaMap = fph::MetaFphMap<KeyType, MappedType, TestHash, std::equal_to<>, Allocator,
+    using FphMetaMap = fph::MetaFphMap<KeyType, MappedType, TestHash, KeyEqual, Allocator,
             BucketParamType>;
 
-
-//    using TestMap = FphMetaMap;
-//    using TestMap = FphMap;
     std::cout << "DynamicFphMap" << std::endl;
     SampleTest<DyFphMap, TestKeyClass>();
 
