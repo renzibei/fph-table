@@ -18,11 +18,11 @@ int main() {
     constexpr size_t TEST_ITEM_SIZE = 1ULL << 22;
     constexpr size_t ITEM_BIT_SIZE = 4UL;
 
-    using UnderlyingEntry = uint32_t;
+    using UnderlyingEntry = uint8_t;
     constexpr size_t UnderlyingEntrySize = TEST_ITEM_SIZE * (sizeof(UnderlyingEntry) * 8UL / ITEM_BIT_SIZE);
     static UnderlyingEntry underlying_arr[UnderlyingEntrySize];
-    static constexpr UnderlyingEntry ITEM_MASK = (~((UnderlyingEntry) 0UL)) >>
-            (std::numeric_limits<UnderlyingEntry>::digits - ITEM_BIT_SIZE);
+    static constexpr UnderlyingEntry ITEM_MASK =
+            fph::meta::detail::GenBitMask<UnderlyingEntry>(ITEM_BIT_SIZE);
     static uint32_t bench_table[TEST_ITEM_SIZE];
     memset(underlying_arr, 0, sizeof(underlying_arr));
     memset(bench_table, 0, sizeof(bench_table));

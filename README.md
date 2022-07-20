@@ -140,7 +140,12 @@ The APIs are almost the same with the `std::unordered_set` and `std::unordered_m
 and `fph::MetaFphMap<Key, T, SeedHash, KeyEqual, Allocator, BucketParamType>` are the fph map
 containers.
 
-The following sample shows how to deal with the custom key class:
+There are also aliases for these containers: `fph::dynamic_fph_set`,
+`fph::dynamic_fph_map`,`fph::meta_fph_set` and `fph::meta_fph_map`.
+
+The following sample shows how to deal with the custom key class,
+you can see `tests/sample_fph.cpp` for the more detailed
+example.
 
 ```c++
 #include "fph/dynamic_fph_table.h"
@@ -242,9 +247,25 @@ int main() {
 You can use the containers we provided to replace `std::unordered_set` or `std::unrodered_map` if
 you care more about lookup performance. Or if all you need is a perfect hash function i.e. a mapping
 from keys to the integers in a limited range, you can use the
-`fph::DynamicFphSet::GetSlotPos(const key_type &key)` function to get the slot index of one key in
+`fph::DynamicFphSet::GetSlotPos(const Key &key)` function to get the slot index of one key in
 the table, which is unique. The `GetSlotPos` is always faster than the `find` lookup as it does not
 fetch data from the slots (which occupy most of the memory of a hash table).
+
+### Heterogeneous lookup
+
+Sometimes users don't want to use the `Key` as the key to do the `find`
+operation. For example, when the `Key` is `std::string`, users may want to
+use `std::string_view` as the type to do the lookup operations.
+
+```c++
+template< class K > iterator find( const K& x );
+template< class K > const_iterator find( const K& x ) const;
+```
+
+These two overload functions participate in overload resolution only if
+`SeedHash::is_transparent` and `KeyEqual::is_transparent` are valid and each
+denotes a type. You can see the `tests/sample_fph.cpp` to learn this usage.
+This is basically the same transparent lookup framework used in C++20.
 
 ### Requirement of the seed hash function
 
