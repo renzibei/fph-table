@@ -894,12 +894,13 @@ namespace fph {
 
     namespace dynamic::detail {
 
-        template<class Key, class KeyPointerAllocator=std::allocator<const Key *>,
-                class SizeTAllocator=std::allocator<size_t>>
+        template<class Key,
+                class KeyPointerAllocator=std::allocator<const Key *>,
+                class BucketParamType = uint32_t>
         struct FphBucket {
         public:
-            size_t entry_cnt;
-            size_t index;
+            BucketParamType entry_cnt;
+            BucketParamType index;
             std::vector<const Key *, KeyPointerAllocator> key_array;
 
             explicit FphBucket(size_t index) noexcept: entry_cnt(0), index(index) {}
@@ -1363,7 +1364,7 @@ namespace fph {
 //                item_num_mask_ = param_->item_num_ceil_ - 1U;
                 slot_index_policy_ = IndexMapPolicy(param_->item_num_ceil_);
 
-                Build<false, true>(end(), end(), 0, false, DEFAULT_BITS_PER_KEY,
+                Build<false, false, true>(end(), end(), 0, false, DEFAULT_BITS_PER_KEY,
                                    DEFAULT_KEYS_FIRST_PART_RATIO,
                                    DEFAULT_BUCKETS_FIRST_PART_RATIO);
                 (void)hash;
@@ -1569,18 +1570,20 @@ namespace fph {
             }
 
 
-            template<bool is_rehash, bool use_move=false, bool last_element_only_has_key=false, class InputIt>
+            template<bool is_rehash, bool called_by_rehash,
+                    bool use_move=false, bool last_element_only_has_key=false, class InputIt>
             void Build(InputIt pair_begin, InputIt pair_end, uint64_t seed = 0,
                        bool verbose = false, double c = DEFAULT_BITS_PER_KEY,
                        double keys_first_part_ratio = DEFAULT_KEYS_FIRST_PART_RATIO, double buckets_first_part_ratio = DEFAULT_BUCKETS_FIRST_PART_RATIO,
                        size_t max_try_seed2_time = 1000, size_t max_reseed2_time = 1000) {
                 constexpr size_t max_try_seed0_time = 5;
                 constexpr size_t max_try_seed1_time = 100;
-                BuildImp<is_rehash, use_move, last_element_only_has_key>(pair_begin, pair_end, seed,
-                                                                         verbose, c, keys_first_part_ratio,
-                                                                         buckets_first_part_ratio,
-                                                                         max_try_seed0_time,
-                                                                         max_try_seed1_time, max_try_seed2_time, max_reseed2_time);
+                BuildImp<is_rehash, called_by_rehash, use_move,
+                            last_element_only_has_key>(pair_begin, pair_end, seed,
+                             verbose, c, keys_first_part_ratio,
+                             buckets_first_part_ratio,
+                             max_try_seed0_time,
+                             max_try_seed1_time, max_try_seed2_time, max_reseed2_time);
             }
 
             void rehash(size_type count) {
@@ -1603,7 +1606,7 @@ namespace fph {
                                                                     temp_value_buf++, std::move(*it));
                     }
 
-                    Build<true, true>(temp_value_buf_start, temp_value_buf_start + param_->item_num_, seed1_,
+                    Build<true, true, true>(temp_value_buf_start, temp_value_buf_start + param_->item_num_, seed1_,
 #if FPH_DEBUG_FLAG
                             true,
 #else
@@ -1619,6 +1622,8 @@ namespace fph {
                     for (auto *temp_buf_ptr = temp_value_buf_start; temp_buf_ptr != temp_value_buf_start + param_->item_num_; temp_buf_ptr++) {
                         std::allocator_traits<Allocator>::destroy(param_->alloc_, temp_buf_ptr);
                     }
+                    param_->temp_pair_buf_.clear();
+                    param_->temp_pair_buf_.shrink_to_fit();
                 }
 
 
@@ -1682,7 +1687,7 @@ namespace fph {
                     for (; first != last; ++first) emplace(*first);
                 }
                 else {
-                    Build<false, false>(first, last, seed1_, false, param_->bits_per_key_);
+                    Build<false, false, false>(first, last, seed1_, false, param_->bits_per_key_);
                 }
 
             }
@@ -2049,7 +2054,7 @@ namespace fph {
             size_t seed1_, seed2_; // direct
 
             using BucketParamAllocator = typename std::allocator_traits<Allocator>::template rebind_alloc<BucketParamType>;
-//            using BucketParamArray = std::vector<BucketParamType, BucketParamAllocator>;
+            using BucketParamVector = std::vector<BucketParamType, BucketParamAllocator>;
             BucketParamType *bucket_p_array_; // direct
 
             using slot_type = typename Policy::slot_type;
@@ -2064,7 +2069,8 @@ namespace fph {
             using KeyAllocator = typename std::allocator_traits<Allocator>::template rebind_alloc<key_type>;
             using CharAllocator = typename std::allocator_traits<Allocator>::template rebind_alloc<char>;
 
-            using BucketType = detail::FphBucket<key_type, KeyPointerAllocator>;
+            using BucketType = detail::FphBucket<key_type, KeyPointerAllocator,
+                                                BucketParamType>;
             using BucketAllocator = typename std::allocator_traits<Allocator>::template rebind_alloc<BucketType>;
 
             using SizeTVector = std::vector<size_t, SizeTAllocator>;
@@ -2220,8 +2226,8 @@ namespace fph {
                 std::vector<bool, BoolAllocator> seed2_test_table_;
                 SizeTVector tested_hash_vec_;
 
-                SizeTVector random_table_;
-                SizeTVector map_table_;
+                BucketParamVector random_table_;
+                BucketParamVector map_table_;
                 std::vector<BucketType, BucketAllocator> bucket_array_;
 //                BucketType *bucket_array_;
                 // TODO: may use pointer to replace vector to save space
@@ -2851,7 +2857,7 @@ namespace fph {
                                                                            std::addressof(temp_slot_ptr->key), key);
 
                             ++param_->item_num_;
-                            Build<true, true, true>(temp_value_buf_start,
+                            Build<true, false, true, true>(temp_value_buf_start,
                                                     temp_value_buf_start + param_->item_num_, seed1_,
 #if FPH_DEBUG_FLAG
                                     true, // verbose
@@ -2877,6 +2883,8 @@ namespace fph {
                                     std::allocator_traits<KeyAllocator>::destroy(key_alloc, std::addressof(slot_type::GetSlotAddressByValueAddress(temp_value_ptr)->key));
                                 }
                             }
+                            param_->temp_pair_buf_.clear();
+                            param_->temp_pair_buf_.shrink_to_fit();
                             auto temp_pos = GetSlotPos(key);
                             insert_address = slot_ + temp_pos;
                         }
@@ -3055,7 +3063,9 @@ namespace fph {
             }
 
 
-            template<bool is_rehash, bool use_move, bool last_element_only_has_key=false, class InputIt>
+            template<bool is_rehash, bool called_by_rehash, bool use_move,
+                    bool last_element_only_has_key=false,
+                    class InputIt>
             void BuildImp(InputIt pair_begin, InputIt pair_end, uint64_t seed = 0,
                           bool verbose = false, double c = 3.0,
                           double keys_first_part_ratio = 0.6, double buckets_first_part_ratio = 0.3,
@@ -3144,7 +3154,13 @@ namespace fph {
 
                 }
 
-                param_->slot_capacity_ = std::max(param_->item_num_ceil_, param_->slot_capacity_);
+                if (called_by_rehash) {
+                    param_->slot_capacity_ = param_->item_num_ceil_;
+                }
+                else {
+                    param_->slot_capacity_ = std::max(param_->item_num_ceil_, param_->slot_capacity_);
+                }
+
 
 
                 // mapping
@@ -3176,6 +3192,9 @@ namespace fph {
                 p1_ = temp_p1;
 
 #else
+
+
+
                 param_->bucket_num_ = dynamic::detail::Ceil2(temp_bucket_num);
                 if (param_->bucket_num_ <= 1UL) {
                     param_->bucket_num_ = 2U;
@@ -3184,17 +3203,29 @@ namespace fph {
                 bucket_index_policy_.UpdateBySlotNum(param_->bucket_num_);
 #endif
 
-                param_->bucket_capacity_ = std::max(param_->bucket_num_, param_->bucket_capacity_);
+                if (called_by_rehash) {
+                    param_->bucket_capacity_ = param_->bucket_num_;
+                }
+                else {
+                    param_->bucket_capacity_ = std::max(param_->bucket_num_, param_->bucket_capacity_);
+                }
 
-                if (old_bucket_capacity < param_->bucket_capacity_ || bucket_p_array_ == nullptr) {
+
+                if (old_bucket_capacity < param_->bucket_capacity_
+                    || (old_bucket_capacity > param_->bucket_capacity_ && called_by_rehash)
+                    || bucket_p_array_ == nullptr) {
                     BucketParamAllocator bucket_param_alloc;
                     if (bucket_p_array_ != nullptr) {
                         bucket_param_alloc.deallocate(bucket_p_array_, old_bucket_capacity);
                         bucket_p_array_ = nullptr;
                     }
                     bucket_p_array_ = bucket_param_alloc.allocate(param_->bucket_capacity_);
+                    if (old_bucket_capacity > param_->bucket_capacity_) {
+                        param_->bucket_array_.clear();
+                        param_->bucket_array_.shrink_to_fit();
+                    }
+                    param_->bucket_array_.reserve(param_->bucket_num_);
                 }
-
 
                 if (verbose) {
                     size_t buckets_use_bytes = param_->bucket_num_ * sizeof(BucketParamType);
@@ -3209,7 +3240,6 @@ namespace fph {
                 }
 
 
-                param_->bucket_array_.reserve(param_->bucket_num_);
 
                 std::mt19937_64 random_engine(seed);
                 std::uniform_int_distribution<size_t> random_dis;
@@ -3275,10 +3305,16 @@ namespace fph {
                         param_->seed2_test_table_.resize(param_->item_num_ceil_, false);
                         param_->tested_hash_vec_.clear();
 
+                        size_t old_random_table_size = param_->random_table_.size();
                         param_->random_table_.resize(param_->item_num_ceil_);
                         param_->map_table_.resize(param_->item_num_ceil_);
-
-
+                        // only cause possible allocation when rehash
+                        if (called_by_rehash) {
+                            if (param_->item_num_ceil_ < old_random_table_size) {
+                                param_->random_table_.shrink_to_fit();
+                                param_->map_table_.shrink_to_fit();
+                            }
+                        }
 
                         for (size_t try_seed2_time = 0; try_seed2_time < max_try_seed2_time; ++try_seed2_time) {
 
@@ -3440,14 +3476,16 @@ namespace fph {
 
 
                 // allocate
-                if (old_slot_capacity < param_->slot_capacity_ || slot_ == nullptr) {
-
+                if ((old_slot_capacity < param_->slot_capacity_)
+                    || (old_slot_capacity > param_->slot_capacity_ && called_by_rehash)
+                    || slot_ == nullptr) {
                     if (slot_ != nullptr) {
                         SlotAllocator{}.deallocate(slot_, old_slot_capacity);
                         slot_ = nullptr;
                     }
 
                     slot_ = SlotAllocator().allocate(param_->slot_capacity_);
+
                 }
 
 
