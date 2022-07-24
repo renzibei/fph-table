@@ -742,7 +742,7 @@ namespace fph {
 
         template<class CharT>
         struct SimpleSeedHash<std::basic_string_view<CharT>> {
-            size_t operator()(const std::basic_string_view<CharT> &str, size_t seed) const noexcept {
+            size_t operator()(std::basic_string_view<CharT> str, size_t seed) const noexcept {
                 return meta::detail::HashBytes(str.data(), sizeof(CharT) * str.length(), seed);
             }
         };
@@ -798,7 +798,7 @@ namespace fph {
 
         template<class CharT>
         struct MixSeedHash<std::basic_string_view<CharT>> {
-            size_t operator()(const std::basic_string_view<CharT> &str, size_t seed) const {
+            size_t operator()(std::basic_string_view<CharT> str, size_t seed) const {
                 return meta::detail::HashBytes(str.data(), sizeof(CharT) * str.length(), seed);
             }
         };
@@ -854,7 +854,7 @@ namespace fph {
 
         template<class CharT>
         struct StrongSeedHash<std::basic_string_view<CharT>> {
-            size_t operator()(const std::basic_string_view<CharT> &str, size_t seed) const noexcept {
+            size_t operator()(std::basic_string_view<CharT> str, size_t seed) const noexcept {
                 return meta::detail::HashBytes(str.data(), sizeof(CharT) * str.length(), seed);
             }
         };
@@ -1213,11 +1213,38 @@ namespace fph {
 
         };
 
-    } // namespace detail
+    } // namespace meta::detail
 
     namespace meta::detail {
 
-        template<class Policy, class Hash, class KeyEqual, class Allocator, class BucketParamType>
+        // For Heterogeneous lookup
+        // https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2019/p1690r0.html
+
+        template<typename... Ts> struct make_void { typedef void type;};
+        template<typename... Ts> using void_t = typename make_void<Ts...>::type;
+
+        template <class, class = void>
+        struct IsTransparent : std::false_type {};
+        template <class T>
+        struct IsTransparent<T, void_t<typename T::is_transparent>>
+                : std::true_type {};
+
+        template <bool is_transparent>
+        struct KeyArg {
+            // Transparent. Forward `K`.
+            template <typename K, typename key_type>
+            using type = K;
+        };
+
+        template <>
+        struct KeyArg<false> {
+            // Not transparent. Always use `key_type`.
+            template <typename K, typename key_type>
+            using type = key_type;
+        };
+
+        template<class Policy, class Hash, class KeyEqual, class Allocator,
+                class BucketParamType>
         class MetaRawSet {
         public:
 
@@ -1241,9 +1268,17 @@ namespace fph {
             friend const_iterator;
 #endif
 
-            explicit MetaRawSet(size_type bucket_count, const Hash& hash = Hash(),
-                                   const key_equal& equal = key_equal(),
-                                   const Allocator& alloc = Allocator()) :
+        private:
+            using KeyArgImpl = KeyArg<IsTransparent<key_equal>::value
+                                      && IsTransparent<hasher>::value>;
+        public:
+            template <class K>
+            using key_arg = typename KeyArgImpl::template type<K, key_type>;
+
+            explicit MetaRawSet(size_type bucket_count,
+                                    const Hash& hash = Hash(),
+                                    const key_equal& equal = key_equal(),
+                                    const Allocator& alloc = Allocator()) :
 #if FPH_DY_DUAL_BUCKET_SET
                     p1_(0), p2_(0), p2_plus_1_(0), p2_remain_(0),
                                 keys_first_part_ratio_(DEFAULT_KEYS_FIRST_PART_RATIO),
@@ -1663,7 +1698,9 @@ namespace fph {
                 return end();
             }
 
-            FPH_ALWAYS_INLINE iterator find(const key_type& FPH_RESTRICT key) FPH_FUNC_RESTRICT noexcept {
+            template<class K = key_type>
+            FPH_ALWAYS_INLINE iterator find(const key_arg<K>&
+                    FPH_RESTRICT key) FPH_FUNC_RESTRICT noexcept {
                 auto seed0_hash = hash_(key);
                 auto seed1_hash = MidHash(seed0_hash, seed1_);
                 auto slot_pos = GetSlotPosBySeed0And1Hash(seed0_hash, seed1_hash);
@@ -1680,7 +1717,9 @@ namespace fph {
                 return end();
             }
 
-            FPH_ALWAYS_INLINE const_iterator find(const key_type& FPH_RESTRICT key) const FPH_FUNC_RESTRICT noexcept {
+            template<class K = key_type>
+            FPH_ALWAYS_INLINE const_iterator find(const key_arg<K>&
+                    FPH_RESTRICT key) const FPH_FUNC_RESTRICT noexcept {
                 auto seed0_hash = hash_(key);
                 auto seed1_hash = MidHash(seed0_hash, seed1_);
                 auto slot_pos = GetSlotPosBySeed0And1Hash(seed0_hash, seed1_hash);
@@ -1697,11 +1736,6 @@ namespace fph {
                 return end();
             }
 
-            // TODO: support transparent key
-//            template<class K>
-//            iterator find(const K &x) {
-//
-//            }
 
 #endif
 
@@ -1765,17 +1799,19 @@ namespace fph {
                 }
             }
 
-            size_t count(const key_type &key) const {
+            template<class K = key_type>
+            size_t count(const key_arg<K> &key) const {
                 auto seed0_hash = hash_(key);
                 auto seed1_hash = MidHash(seed0_hash, seed1_);
                 auto slot_pos = GetSlotPosBySeed0And1Hash(seed0_hash, seed1_hash);
-                if (MayEqual(slot_pos, seed1_hash) && key_equal_(key, slot_[slot_pos].key)) {
+                if (MayEqual(slot_pos, seed1_hash) && key_equal_(slot_[slot_pos].key, key)) {
                     return 1U;
                 }
                 return 0;
             }
 
-            bool contains(const key_type& key) const {
+            template<class K = key_type>
+            bool contains(const key_arg<K>& key) const {
                 return count(key) == 1U;
             }
 
@@ -1783,7 +1819,8 @@ namespace fph {
                 return contains(slot_type::GetSlotAddressByValueAddress(std::addressof(ele))->key);
             }
 
-            std::pair<iterator,iterator> equal_range( const key_type& key ) {
+            template<class K = key_type>
+            std::pair<iterator,iterator> equal_range( const key_arg<K>& key ) {
                 auto it = find(key);
                 if (it != end()) {
                     return {it, std::next(it)};
@@ -1791,7 +1828,8 @@ namespace fph {
                 return {it, it};
             }
 
-            std::pair<const_iterator,const_iterator> equal_range( const key_type& key ) const {
+            template<class K = key_type>
+            std::pair<const_iterator,const_iterator> equal_range( const key_arg<K>& key ) const {
                 auto it = find(key);
                 if (it != end()) {return {it, std::next(it)};}
                 return {it, it};
@@ -1836,13 +1874,17 @@ namespace fph {
              * @param key
              * @return
              */
-            FPH_ALWAYS_INLINE pointer GetPointerNoCheck(const key_type& FPH_RESTRICT key)
+            template<class K = key_type>
+            FPH_ALWAYS_INLINE pointer GetPointerNoCheck(const key_arg<K>&
+                    FPH_RESTRICT key)
             FPH_FUNC_RESTRICT noexcept {
                 size_t pos = GetSlotPos(key);
                 return std::addressof(slot_[pos].value);
             }
 
-            FPH_ALWAYS_INLINE const_pointer GetPointerNoCheck(const key_type& FPH_RESTRICT key)
+            template<class K = key_type>
+            FPH_ALWAYS_INLINE const_pointer GetPointerNoCheck(const key_arg<K>&
+                    FPH_RESTRICT key)
             const FPH_FUNC_RESTRICT noexcept {
                 size_t pos = GetSlotPos(key);
                 return std::addressof(slot_[pos].value);
@@ -1854,7 +1896,9 @@ namespace fph {
              * @param key
              * @return
              */
-            FPH_ALWAYS_INLINE size_t GetSlotPos(const key_type &key) const FPH_FUNC_RESTRICT noexcept {
+            template<class K = key_type>
+            FPH_ALWAYS_INLINE size_t GetSlotPos(const key_arg<K> &key)
+                    const FPH_FUNC_RESTRICT noexcept {
                 auto k_seed0_hash = hash_(key);
                 size_t bucket_index = GetBucketIndex(k_seed0_hash);
                 auto bucket_param = bucket_p_array_[bucket_index];
@@ -1899,7 +1943,9 @@ namespace fph {
                 return slot_pos;
             }
 
-            FPH_ALWAYS_INLINE size_t GetSlotPos(const key_type &key, size_t offset, size_t optional_bit)
+            template<class K = key_type>
+            FPH_ALWAYS_INLINE size_t GetSlotPos(const key_arg<K> &key,
+                                            size_t offset, size_t optional_bit)
             const FPH_FUNC_RESTRICT noexcept {
                 auto k_seed0_hash = hash_(key);
                 auto temp_hash_value = MidHash(k_seed0_hash, MixSeedAndBit(seed2_, optional_bit));
@@ -3351,7 +3397,7 @@ namespace fph {
         }; // class raw set
 
 
-    } // namespace detail
+    } // namespace meta::detail
 
     namespace meta::detail {
 
@@ -3475,6 +3521,14 @@ namespace fph {
 
     };
 
+    template<class Key,
+            class SeedHash = meta::SimpleSeedHash<Key>,
+            class KeyEqual = std::equal_to<Key>,
+            class Allocator = std::allocator<Key>,
+            class BucketParamType = uint32_t>
+    using meta_fph_set = MetaFphSet<Key, SeedHash, KeyEqual, Allocator,
+                            BucketParamType>;
+
     namespace meta::detail {
 
         namespace memory {
@@ -3596,7 +3650,6 @@ namespace fph {
         using key_type = typename Base::key_type;
 
 
-
         using Base::find;
 
         using Base::emplace;
@@ -3648,6 +3701,15 @@ namespace fph {
 
     protected:
     };
+
+    template <class Key, class T,
+            class SeedHash = meta::SimpleSeedHash<Key>,
+            class KeyEqual = std::equal_to<Key>,
+            class Allocator = std::allocator<std::pair<const Key, T>>,
+            class BucketParamType = uint32_t
+    >
+    using meta_fph_map = MetaFphMap<Key, T, SeedHash, KeyEqual, Allocator,
+                            BucketParamType>;
 
 
 } // namespace fph
