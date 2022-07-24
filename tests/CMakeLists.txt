@@ -7,7 +7,9 @@ set(CMAKE_CXX_STANDARD 17)
 set(MEMCHECK_FLAGS "-fsanitize=address -fno-omit-frame-pointer -fno-optimize-sibling-calls")
 set(MEMCHECK_FLAGS "")
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wno-format-security ${MEMCHECK_FLAGS}")
+if(NOT MSVC)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wno-format-security ${MEMCHECK_FLAGS}")
+endif()
 
 add_executable(fph_table_tests main.cpp test_fph_table.cpp)
 
