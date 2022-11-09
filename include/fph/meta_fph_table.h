@@ -3558,11 +3558,11 @@ namespace fph {
     };
 
     template<class Key,
-            class SeedHash = meta::SimpleSeedHash<Key>,
+            class Hash = std::hash<Key>,
             class KeyEqual = std::equal_to<Key>,
             class Allocator = std::allocator<Key>,
             class BucketParamType = uint32_t>
-    using meta_fph_set = MetaFphSet<Key, SeedHash, KeyEqual, Allocator,
+    using meta_fph_set = MetaFphSet<Key, Hash, KeyEqual, Allocator,
                             BucketParamType>;
 
     namespace meta::detail {
@@ -3739,12 +3739,12 @@ namespace fph {
     };
 
     template <class Key, class T,
-            class SeedHash = meta::SimpleSeedHash<Key>,
+            class Hash = std::hash<Key>,
             class KeyEqual = std::equal_to<Key>,
             class Allocator = std::allocator<std::pair<const Key, T>>,
             class BucketParamType = uint32_t
     >
-    using meta_fph_map = MetaFphMap<Key, T, SeedHash, KeyEqual, Allocator,
+    using meta_fph_map = MetaFphMap<Key, T, Hash, KeyEqual, Allocator,
                             BucketParamType>;
 
 

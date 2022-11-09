@@ -3831,12 +3831,12 @@ namespace fph {
 
     };
 
-    template<class Key, class SeedHash = SimpleSeedHash<Key>,
+    template<class Key, class Hash = std::hash<Key>,
             class KeyEqual = std::equal_to<Key>,
             class Allocator = std::allocator<Key>,
             class BucketParamType = uint32_t,
             class RandomKeyGenerator = dynamic::RandomGenerator<Key> >
-    using dynamic_fph_set = DynamicFphSet<Key, SeedHash, KeyEqual, Allocator,
+    using dynamic_fph_set = DynamicFphSet<Key, Hash, KeyEqual, Allocator,
                                 BucketParamType, RandomKeyGenerator>;
 
     namespace dynamic::detail {
@@ -4021,12 +4021,12 @@ namespace fph {
     };
 
     template <class Key, class T,
-            class SeedHash = SimpleSeedHash<Key>,
+            class Hash = std::hash<Key>,
             class KeyEqual = std::equal_to<Key>,
             class Allocator = std::allocator<std::pair<const Key, T>>,
             class BucketParamType = uint32_t,
             class RandomKeyGenerator = fph::dynamic::RandomGenerator<Key> >
-    using dynamic_fph_map = DynamicFphMap<Key, T, SeedHash, KeyEqual, Allocator,
+    using dynamic_fph_map = DynamicFphMap<Key, T, Hash, KeyEqual, Allocator,
                             BucketParamType, RandomKeyGenerator>;
 
 
