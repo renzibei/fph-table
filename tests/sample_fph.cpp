@@ -112,6 +112,11 @@ void SampleTest() {
             std::cout << "find value at c is " << temp_find_it->second <<
             std::endl;
         }
+        auto &c_value = fph_map.at("c"sv);
+        std::cout << "value at c is " << c_value << std::endl;
+
+        auto &c_ref = fph_map["c"sv];
+        std::cout << "value operator[] at c is " << c_ref << std::endl;
     }
     if (fph_map.contains("d"s)) {
         std::cout << "contains d in table" << std::endl;
