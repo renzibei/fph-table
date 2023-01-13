@@ -164,6 +164,16 @@ namespace fph {
 #endif
 #endif
 
+#ifndef FPH_HAVE_EXCEPTIONS
+
+#if !(defined(__GNUC__) && !defined(__cpp_exceptions)) && \
+    !(defined(__GNUC__) && defined(__cpp_exceptions) && __cpp_exceptions == 0 ) && \
+    !(defined(_MSC_VER) && !defined(_CPPUNWIND))
+#define FPH_HAVE_EXCEPTIONS 1
+#endif
+
+#endif
+
 // From absl library
 // A function-like feature checking macro that accepts C++11 style attributes.
 // It's a wrapper around `__has_cpp_attribute`, defined by ISO C++ SD-6
@@ -341,6 +351,33 @@ namespace fph {
             using unsigned_promoted_type = typename std::make_unsigned<promoted_type>::type;
             return ((unsigned_promoted_type{v} >> mb)
                     | (unsigned_promoted_type{v} << (-mb & count_mask)));
+        }
+
+        void ThrowRuntimeError(const char* what) {
+#ifdef FPH_HAVE_EXCEPTIONS
+            throw std::runtime_error(what);
+#else
+            (void)what;
+            std::abort();
+#endif
+        }
+
+        void ThrowInvalidArgument(const char* what) {
+#ifdef FPH_HAVE_EXCEPTIONS
+            throw std::invalid_argument(what);
+#else
+            (void)what;
+            std::abort();
+#endif
+        }
+
+        void ThrowOutOfRange(const char* what) {
+#ifdef FPH_HAVE_EXCEPTIONS
+            throw std::out_of_range(what);
+#else
+            (void)what;
+            std::abort();
+#endif
         }
 
         // Used to fetch bits from array
@@ -2913,15 +2950,15 @@ namespace fph {
                 auto build_start_time = std::chrono::high_resolution_clock::now();
 
                 if FPH_UNLIKELY(c < 1.45) {
-                    throw std::invalid_argument("c must be no less than 1.45");
+                    ThrowInvalidArgument("c must be no less than 1.45");
                 }
 
                 if FPH_UNLIKELY(keys_first_part_ratio < 0.0 || keys_first_part_ratio > 1.0) {
-                    throw std::invalid_argument("keys_first_part_ratio must be in [0.0, 1.0]");
+                    ThrowInvalidArgument("keys_first_part_ratio must be in [0.0, 1.0]");
                 }
 
                 if FPH_UNLIKELY(buckets_first_part_ratio < 0.0 || buckets_first_part_ratio > 1.0) {
-                    throw std::invalid_argument("buckets_first_part_ratio must be in [0.0, 1.0]");
+                    ThrowInvalidArgument("buckets_first_part_ratio must be in [0.0, 1.0]");
                 }
 
 
@@ -2931,7 +2968,7 @@ namespace fph {
 
 
                 if FPH_UNLIKELY(temp_key_num < 0) {
-                    throw std::invalid_argument("Input pair_begin > pair_end");
+                    ThrowInvalidArgument("Input pair_begin > pair_end");
                     return;
                 }
 
@@ -2979,9 +3016,9 @@ namespace fph {
                 param_->should_expand_item_num_ = std::ceil(param_->item_num_ceil_ * param_->max_load_factor_);
 
                 if (key_num > param_->item_num_ceil_) {
-                    throw std::invalid_argument("BucketParamType num_bits: " +
-                                                std::to_string(bucket_param_type_num_bits_) +
-                                                " ,key number: " + std::to_string(key_num));
+                    ThrowInvalidArgument(("BucketParamType num_bits: " +
+                        std::to_string(bucket_param_type_num_bits_) +
+                        " ,key number: " + std::to_string(key_num)).c_str());
                     return;
 
                 }
@@ -3287,9 +3324,9 @@ namespace fph {
                 } // for try_seed0_time
 
                 if (!build_succeed_flag) {
-                    throw std::invalid_argument("timeout when try to build fph map, consider using a stronger seed hash function, key_num: "
-                                                + std::to_string(key_num) + ", item_num_ceil: " + std::to_string(param_->item_num_ceil_)
-                                                + ", bucket num: " + std::to_string(param_->bucket_num_));
+                    ThrowInvalidArgument(("timeout when try to build fph map, consider using a stronger seed hash function, key_num: "
+                        + std::to_string(key_num) + ", item_num_ceil: " + std::to_string(param_->item_num_ceil_)
+                        + ", bucket num: " + std::to_string(param_->bucket_num_)).c_str());
                 }
 
 
@@ -3676,6 +3713,8 @@ namespace fph {
     class MetaFphMap : public meta::detail::MetaRawSet<meta::detail::MetaFphMapPolicy<Key, T>,
             Hash, KeyEqual, Allocator, BucketParamType> {
         using Base = typename MetaFphMap::MetaRawSet;
+        template<class K>
+        using key_arg = typename Base::template key_arg<K>;
     public:
 
         using mapped_type = T;
@@ -3700,39 +3739,39 @@ namespace fph {
 
         template<class... Args>
         std::pair<iterator, bool> try_emplace(key_type&& k, Args&&... args) {
-            return this-> template TryEmplaceImp<>(std::move(k), std::forward<Args>(args)...);
+            return this-> template TryEmplaceImp<>(std::move(k),
+                                                   std::forward<Args>(args)...);
         }
 
-        T& operator[] (const Key &key) {
+        T& operator[] (const key_type &key) {
             return this->try_emplace(key).first->second;
         }
 
-        T& operator[] (Key&& key) {
+        T& operator[] (key_type&& key) {
             return this->try_emplace(std::move(key)).first->second;
         }
 
-        const T& operator[] (const Key &key) const noexcept {
+        template<class K = key_type>
+        const T& operator[] (const key_arg<K> &key) const noexcept {
             return this->GetPointerNoCheck(key)->second;
         }
 
-        T& at (const Key& key) {
-            auto it = this->find(key);
-            if (it != this->end()) {
-                return it->second;
+        template<class K = key_type>
+        T& at (const key_arg<K> &key) {
+            auto *pair_ptr = this->GetPointerNoCheck(key);
+            if FPH_UNLIKELY(!this->key_equal_(pair_ptr->first, key)) {
+                meta::detail::ThrowOutOfRange("Can not find key in at");
             }
-            else {
-                throw std::out_of_range("Can not find key in at");
-            }
+            return pair_ptr->second;
         }
 
-        const T& at (const Key& key) const {
-            auto it = this->find(key);
-            if (it != this->end()) {
-                return it->second;
+        template<class K = key_type>
+        const T& at (const key_arg<K>& key) const {
+            const auto *pair_ptr = this->GetPointerNoCheck(key);
+            if FPH_UNLIKELY(!this->key_equal_(pair_ptr->first, key)) {
+                meta::detail::ThrowOutOfRange("Can not find key in at");
             }
-            else {
-                throw std::out_of_range("Can not find key in at");
-            }
+            return pair_ptr->second;
         }
 
     protected:

@@ -156,6 +156,16 @@ namespace fph {
 #endif
 #endif
 
+#ifndef FPH_HAVE_EXCEPTIONS
+
+#if !(defined(__GNUC__) && !defined(__cpp_exceptions)) && \
+    !(defined(__GNUC__) && defined(__cpp_exceptions) && __cpp_exceptions == 0 ) && \
+    !(defined(_MSC_VER) && !defined(_CPPUNWIND))
+#define FPH_HAVE_EXCEPTIONS 1
+#endif
+
+#endif
+
 // From absl library
 // A function-like feature checking macro that accepts C++11 style attributes.
 // It's a wrapper around `__has_cpp_attribute`, defined by ISO C++ SD-6
@@ -334,6 +344,35 @@ namespace fph {
             return ((unsigned_promoted_type{v} >> mb)
                     | (unsigned_promoted_type{v} << (-mb & count_mask)));
         }
+
+
+        void ThrowRuntimeError(const char* what) {
+#ifdef FPH_HAVE_EXCEPTIONS
+            throw std::runtime_error(what);
+#else
+            (void)what;
+            std::abort();
+#endif
+        }
+
+        void ThrowInvalidArgument(const char* what) {
+#ifdef FPH_HAVE_EXCEPTIONS
+            throw std::invalid_argument(what);
+#else
+            (void)what;
+            std::abort();
+#endif
+        }
+
+        void ThrowOutOfRange(const char* what) {
+#ifdef FPH_HAVE_EXCEPTIONS
+            throw std::out_of_range(what);
+#else
+            (void)what;
+            std::abort();
+#endif
+        }
+
 
 
     } // namespace dynamic::detail
@@ -3014,10 +3053,10 @@ namespace fph {
 #endif
                                     // TODO: free the memory when throw
                                     if FPH_UNLIKELY(++try_gen_second_key_cnt > 10000ULL) {
-                                        throw std::runtime_error("Failed to find second default key "
-                                                                 "with different position than the first default key, maybe "
-                                                                 "the seed hash is not strong enough or the key generator "
-                                                                 "cannot generate enough different keys");
+                                        ThrowRuntimeError("Failed to find second default key "
+                                                          "with different position than the first default key, maybe "
+                                                          "the seed hash is not strong enough or the key generator "
+                                                          "cannot generate enough different keys");
                                     }
                                 }
                                 if (original_default_key_pos_empty_status) {
@@ -3121,15 +3160,15 @@ namespace fph {
                 auto build_start_time = std::chrono::high_resolution_clock::now();
 
                 if FPH_UNLIKELY(c < 1.45) {
-                    throw std::invalid_argument("c must be no less than 1.45");
+                    ThrowRuntimeError("c must be no less than 1.45");
                 }
 
                 if FPH_UNLIKELY(keys_first_part_ratio < 0.0 || keys_first_part_ratio > 1.0) {
-                    throw std::invalid_argument("keys_first_part_ratio must be in [0.0, 1.0]");
+                    ThrowRuntimeError("keys_first_part_ratio must be in [0.0, 1.0]");
                 }
 
                 if FPH_UNLIKELY(buckets_first_part_ratio < 0.0 || buckets_first_part_ratio > 1.0) {
-                    throw std::invalid_argument("buckets_first_part_ratio must be in [0.0, 1.0]");
+                    ThrowInvalidArgument("buckets_first_part_ratio must be in [0.0, 1.0]");
                 }
 
 
@@ -3139,7 +3178,7 @@ namespace fph {
 
 
                 if FPH_UNLIKELY(temp_key_num < 0) {
-                    throw std::invalid_argument("Input pair_begin > pair_end");
+                    ThrowInvalidArgument("Input pair_begin > pair_end");
                     return;
                 }
 
@@ -3191,9 +3230,9 @@ namespace fph {
                 param_->should_expand_item_num_ = std::ceil(param_->item_num_ceil_ * param_->max_load_factor_);
 
                 if (key_num > param_->item_num_ceil_) {
-                    throw std::invalid_argument("BucketParamType num_bits: " +
+                    ThrowInvalidArgument(("BucketParamType num_bits: " +
                                                 std::to_string(bucket_param_type_num_bits_) +
-                                                " ,key number: " + std::to_string(key_num));
+                                                " ,key number: " + std::to_string(key_num)).c_str());
                     return;
 
                 }
@@ -3512,9 +3551,12 @@ namespace fph {
                 } // for try_seed0_time
 
                 if (!build_succeed_flag) {
-                    throw std::invalid_argument("timeout when try to build fph map, consider using a stronger seed hash function, key_num: "
-                                                + std::to_string(key_num) + ", item_num_ceil: " + std::to_string(param_->item_num_ceil_)
-                                                + ", bucket num: " + std::to_string(param_->bucket_num_));
+                    ThrowInvalidArgument(("timeout when try to build fph map,"
+                         "consider using a stronger seed hash function, key_num: "
+                            + std::to_string(key_num) + ", item_num_ceil: " +
+                            std::to_string(param_->item_num_ceil_)
+                            + ", bucket num: " +
+                            std::to_string(param_->bucket_num_)).c_str());
                 }
 
 
@@ -3557,7 +3599,7 @@ namespace fph {
                         }
 #endif
                         if (++try_fill_key_time > 100000ULL) {
-                            throw std::invalid_argument("Failed to find a valid fill for key zero");
+                            ThrowInvalidArgument("Failed to find a valid fill for key zero");
                         }
                         std::allocator_traits<KeyAllocator>::destroy(key_alloc, &fill_key);
                         if constexpr(std::is_move_constructible<key_type>::value) {
@@ -3995,26 +4037,22 @@ namespace fph {
             return this->GetPointerNoCheck(key)->second;
         }
 
-        T& at (const Key& key) {
+        template<class K = key_type>
+        T& at (const key_arg<K> &key) {
             auto *pair_ptr = this->GetPointerNoCheck(key);
-
-            if FPH_LIKELY(this->key_equal_(key, pair_ptr->first)) {
-                return pair_ptr->second;
+            if FPH_UNLIKELY(!this->key_equal_(pair_ptr->first, key)) {
+                dynamic::detail::ThrowOutOfRange("Can not find key in at");
             }
-            else {
-                throw std::out_of_range("Can not find key in at");
-            }
+            return pair_ptr->second;
         }
 
-        const T& at (const Key& key) const {
+        template<class K = key_type>
+        const T& at (const key_arg<K>& key) const {
             const auto *pair_ptr = this->GetPointerNoCheck(key);
-
-            if FPH_LIKELY(this->key_equal_(key, pair_ptr->first)) {
-                return pair_ptr->second;
+            if FPH_UNLIKELY(!this->key_equal_(pair_ptr->first, key)) {
+                dynamic::detail::ThrowOutOfRange("Can not find key in at");
             }
-            else {
-                throw std::out_of_range("Can not find key in at");
-            }
+            return pair_ptr->second;
         }
 
     protected:

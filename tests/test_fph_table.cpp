@@ -14,6 +14,13 @@
 
 #define TEST_TABLE_CORRECT 1
 
+#ifdef FPH_HAVE_EXCEPTION
+#   define TEST_TRY try
+#   define TEST_CATCH(X) catch(X)
+#else
+#   define TEST_TRY if (true)
+#   define TEST_CATCH(X) if (false)
+#endif
 
 enum TableType {
     FCH_TABLE = 0,
@@ -242,7 +249,7 @@ template< class Table, class BenchTable, class PairVec, class GetKey = SimpleGet
         class ValueEqual = std::equal_to<typename Table::value_type> >
 bool TestInsertCorrectness(Table &table, BenchTable &bench_table, PairVec &pair_vec1, PairVec &pair_vec2, size_t test_index = 0) {
     (void)test_index;
-    try {
+    TEST_TRY {
         table.clear();
         bench_table.clear();
         if (!IsTableSame<Table, BenchTable, GetKey, ValueEqual>(table, bench_table)) {
@@ -302,8 +309,8 @@ bool TestInsertCorrectness(Table &table, BenchTable &bench_table, PairVec &pair_
             }
         }
     }
-    catch (const std::exception& e) {
-        LogHelper::log(Error, "Catch exception in test insert, %s", e.what());
+    TEST_CATCH (const std::exception& e) {
+        LogHelper::log(Error, "Catch exception in test insert");
         return false;
     }
     return true;
@@ -312,7 +319,7 @@ bool TestInsertCorrectness(Table &table, BenchTable &bench_table, PairVec &pair_
 template<class Table, class BenchTable, class ValueVec, class GetKey = SimpleGetKey<typename Table::value_type>,
         class ValueEqual = std::equal_to<typename Table::value_type> >
 bool TestEmplaceCorrectness1(Table &table, BenchTable &bench_table, ValueVec &value_vec1, ValueVec &value_vec2) {
-    try {
+    TEST_TRY {
         table.clear();
         bench_table.clear();
         if (!IsTableSame<Table, BenchTable, GetKey, ValueEqual>(table, bench_table)) {
@@ -360,8 +367,8 @@ bool TestEmplaceCorrectness1(Table &table, BenchTable &bench_table, ValueVec &va
             return false;
         }
     }
-    catch (const std::exception &e) {
-        LogHelper::log(Error, "catch error in test emplace1\n%s", e.what());
+    TEST_CATCH (const std::exception &e) {
+        LogHelper::log(Error, "catch error in test emplace1");
         return false;
     }
     return true;
@@ -525,7 +532,7 @@ void PrintTableKeys(const Table &table) {
 template< class Table, class BenchTable, class PairVec, class GetKey = SimpleGetKey<typename Table::value_type>,
         class ValueEqual = std::equal_to<typename Table::value_type> >
 bool TestEraseCorrectness(Table &table, BenchTable &bench_table, PairVec &pair_vec1, PairVec &pair_vec2, size_t seed) {
-    try {
+    TEST_TRY {
         table.clear();
         bench_table.clear();
         if (!IsTableSame<Table, BenchTable, GetKey, ValueEqual>(table, bench_table)) {
@@ -627,8 +634,8 @@ bool TestEraseCorrectness(Table &table, BenchTable &bench_table, PairVec &pair_v
             return false;
         }
     }
-    catch (const std::exception& e) {
-        LogHelper::log(Error, "Catch exception in test erase\n%s", e.what());
+    TEST_CATCH (const std::exception& e) {
+        LogHelper::log(Error, "Catch exception in test erase");
         return false;
     }
     return true;
@@ -703,7 +710,7 @@ bool TestPartEraseAndInsert(Table &table, BenchTable &bench_table, PairVec &pair
 template<class Table, class BenchTable, class PairVec, class GetKey = SimpleGetKey<typename Table::value_type>,
         class ValueEqual = std::equal_to<typename Table::value_type>>
 bool TestCopyAndMoveCorrect(Table &table, BenchTable &bench_table, PairVec &pair_vec) {
-    try {
+    TEST_TRY {
         ConstructTable<DYNAMIC_FPH_TABLE>(table, pair_vec, 0);
         ConstructTable<STD_HASH_TABLE>(bench_table, pair_vec, 0);
         if (!IsTableSame<Table, BenchTable, GetKey, ValueEqual>(table, bench_table)) {
@@ -711,13 +718,13 @@ bool TestCopyAndMoveCorrect(Table &table, BenchTable &bench_table, PairVec &pair
             return false;
         }
     }
-    catch (std::exception &e) {
-        LogHelper::log(Error, "Catch exception in the beginning construct of test copy\n%s", e.what());
+    TEST_CATCH (std::exception &e) {
+        LogHelper::log(Error, "Catch exception in the beginning construct of test copy");
         return false;
     }
 
 
-    try {
+    TEST_TRY {
         for (size_t t = 0; t < 2; ++t) {
 
             Table *temp_table_ptr = new Table(table);
@@ -770,8 +777,8 @@ bool TestCopyAndMoveCorrect(Table &table, BenchTable &bench_table, PairVec &pair
 //        }
         }
     }
-    catch (std::exception &e) {
-        LogHelper::log(Error, "Catch exception in test copy and move\n%s", e.what());
+    TEST_CATCH (std::exception &e) {
+        LogHelper::log(Error, "Catch exception in test copy and move");
         return false;
     }
     return true;
@@ -813,12 +820,12 @@ void PrintPairVec(const PairVec &pair_vec) {
 
 void HandleExpPtr(std::exception_ptr eptr) // passing by value is ok
 {
-    try {
+    TEST_TRY {
         if (eptr) {
             std::rethrow_exception(eptr);
         }
-    } catch(const std::exception& e) {
-        LogHelper::log(Error, "Caught exception\n%s", e.what());
+    } TEST_CATCH(const std::exception& e) {
+        LogHelper::log(Error, "Caught exception");
     }
 }
 
@@ -890,7 +897,7 @@ bool TestCorrectness(size_t max_elem_num, size_t test_time) {
 
     auto gen_seed = value_gen.init_seed;
 
-    try {
+    TEST_TRY {
 
         const size_t start_k = 0;
 
@@ -1088,7 +1095,7 @@ bool TestCorrectness(size_t max_elem_num, size_t test_time) {
         }
         delete table_ptr;
 
-    } catch(...) {
+    } TEST_CATCH(...) {
 
         auto e_ptr = std::current_exception();
         LogHelper::log(Error, "Got exception");
