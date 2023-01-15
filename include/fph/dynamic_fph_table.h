@@ -346,7 +346,7 @@ namespace fph {
         }
 
 
-        void ThrowRuntimeError(const char* what) {
+        inline void ThrowRuntimeError(const char* what) {
 #ifdef FPH_HAVE_EXCEPTIONS
             throw std::runtime_error(what);
 #else
@@ -355,7 +355,7 @@ namespace fph {
 #endif
         }
 
-        void ThrowInvalidArgument(const char* what) {
+        inline void ThrowInvalidArgument(const char* what) {
 #ifdef FPH_HAVE_EXCEPTIONS
             throw std::invalid_argument(what);
 #else
@@ -364,7 +364,7 @@ namespace fph {
 #endif
         }
 
-        void ThrowOutOfRange(const char* what) {
+        inline void ThrowOutOfRange(const char* what) {
 #ifdef FPH_HAVE_EXCEPTIONS
             throw std::out_of_range(what);
 #else
