@@ -3144,8 +3144,8 @@ namespace fph {
                             param_->bucket_array_.emplace_back(i);
                         }
 
-                        auto update_bucket_func = [&](const value_type &value) {
-                            const auto *slot_ptr = reinterpret_cast<const slot_type *>(&value);
+                        auto update_bucket_func = [&](const auto* value_ptr) {
+                            const auto *slot_ptr = reinterpret_cast<const slot_type *>(value_ptr);
 //                            size_t hash_value = GetBucketIndex(slot_ptr->key);
                             size_t hash_value = CompleteGetBucketIndex(slot_ptr->key);
                             assert(hash_value < param_->bucket_num_);
@@ -3158,7 +3158,7 @@ namespace fph {
                         };
 
                         for (auto it = pair_begin; it != pair_end; ++it) {
-                            update_bucket_func(*it);
+                            update_bucket_func(std::addressof(*it));
                         }
 
                         std::vector<size_t, SizeTAllocator> sorted_index_array;
