@@ -3673,7 +3673,15 @@ namespace fph {
                 return reinterpret_cast<MetaMapSlotType<K, V>*>(value_ptr);
             }
 
+            static MetaMapSlotType<K, V>* GetSlotAddressByValueAddress(mutable_value_type *value_ptr) {
+                return reinterpret_cast<MetaMapSlotType<K, V>*>(value_ptr);
+            }
+
             static const MetaMapSlotType<K, V>* GetSlotAddressByValueAddress(const value_type *value_ptr) {
+                return reinterpret_cast<const MetaMapSlotType<K, V>*>(value_ptr);
+            }
+
+            static const MetaMapSlotType<K, V>* GetSlotAddressByValueAddress(const mutable_value_type *value_ptr) {
                 return reinterpret_cast<const MetaMapSlotType<K, V>*>(value_ptr);
             }
 
