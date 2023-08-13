@@ -80,14 +80,25 @@ protected:
     fph::dynamic::RandomGenerator<std::string> string_gen;
 };
 
-template<class TestMap, class TestKeyClass>
+template<class TestMap, class TestKeyClass, class MappedType>
 void SampleTest() {
     TestMap fph_map = {{TestKeyClass("a"), 1}, {TestKeyClass("b"), 2}, {TestKeyClass("c"), 3},
                        {TestKeyClass("d"), 4} };
 
+    std::vector<std::pair<::TestKeyClass, MappedType>> vec = { {TestKeyClass("A"), 11},
+                        {TestKeyClass("B"), 12}, {TestKeyClass("C"), 13},
+                       {TestKeyClass("D"), 4} };
+
 
 
     std::cout << "map has elements: " << std::endl;
+    for (const auto& [k, v]: fph_map) {
+        std::cout << "(" << k.data << ", " << v << ") ";
+    }
+    std::cout << std::endl;
+
+    fph_map.insert(vec.begin(), vec.end());
+    std::cout << "Map elements after insert range: " << std::endl;
     for (const auto& [k, v]: fph_map) {
         std::cout << "(" << k.data << ", " << v << ") ";
     }
@@ -162,10 +173,10 @@ void TestFphMap() {
             BucketParamType>;
 
     std::cout << "DynamicFphMap" << std::endl;
-    SampleTest<DyFphMap, TestKeyClass>();
+    SampleTest<DyFphMap, TestKeyClass, MappedType>();
 
     std::cout << std::endl << "MetaFphMap" << std::endl;
-    SampleTest<FphMetaMap, TestKeyClass>();
+    SampleTest<FphMetaMap, TestKeyClass, MappedType>();
 
 }
 

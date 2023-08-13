@@ -3957,7 +3957,15 @@ namespace fph {
                 return reinterpret_cast<DynamicMapSlotType<K, V>*>(value_ptr);
             }
 
+            static DynamicMapSlotType<K, V>* GetSlotAddressByValueAddress(mutable_value_type *value_ptr) {
+                return reinterpret_cast<DynamicMapSlotType<K, V>*>(value_ptr);
+            }
+
             static const DynamicMapSlotType<K, V>* GetSlotAddressByValueAddress(const value_type *value_ptr) {
+                return reinterpret_cast<const DynamicMapSlotType<K, V>*>(value_ptr);
+            }
+
+            static const DynamicMapSlotType<K, V>* GetSlotAddressByValueAddress(const mutable_value_type *value_ptr) {
                 return reinterpret_cast<const DynamicMapSlotType<K, V>*>(value_ptr);
             }
 
