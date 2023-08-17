@@ -1755,14 +1755,17 @@ namespace fph {
 
             template <class InputIt>
             void insert(InputIt first, InputIt last) {
-//
+                for (; first != last; ++first) emplace(*first);
+            }
+
+            template <class InputIt>
+            void InsertNoDuplicated(InputIt first, InputIt last) {
                 if (param_->item_num_ != 0) {
                     for (; first != last; ++first) emplace(*first);
                 }
                 else {
                     Build<false, false, false>(first, last, seed1_, false, param_->bits_per_key_);
                 }
-
             }
 
             void insert(std::initializer_list<value_type> ilist) {

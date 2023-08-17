@@ -339,7 +339,7 @@ of slots is m and the element number is n. n <= m and the size of slots will be
 The speed of insertion is very sensitive to the max_load_factor parameter. If you use the
 `insert(const value_type&)` function to construct a table, and you do care a little about the insert time, we suggest
 that you use the default max_load_factor, which is around 0.6. But if you don't care about the
-insert time, or you use the `insert(first, last)` or `Build()` to construct the table, and most importantly, you want
+insert time, or you use the `InsertNoDuplicated(first, last)` or `Build()` to construct the table, and most importantly, you want
 to save the memory size and cache size (which would probably accelerate the querying), you can
 set a max_load_factor no larger than max_load_factor_upper_limit(), which should be 0.98.
 
