@@ -70,9 +70,9 @@ jobs:
       - uses: actions/checkout@v4
       - run: tests/ci/check-sizeof.sh
 
-  # Allocations, bytes, peak footprint and key copies/moves for fixed workloads,
-  # as upper bounds. An improvement passes with no baseline edit.
-  # Overridable with the allow-cost-increase label.
+  # Allocations, bytes, peak footprint, key copies/moves and the table geometry
+  # for fixed workloads, as upper bounds. An improvement passes with no baseline
+  # edit. Overridable with the allow-cost-increase label.
   construction-cost:
     name: counters ${{ matrix.os }} ${{ matrix.cxx }}
     runs-on: ${{ matrix.os }}

@@ -41,6 +41,7 @@
 #include "fph/dynamic_fph_table.h"
 #include "fph/meta_fph_table.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -434,6 +435,126 @@ void CopyCountedMap() {
     }
 }
 
+// ------------------------------------------------------------- geometry --
+//
+// tests/ci/check-asm.sh proves the lookup path's CODE is unchanged. It cannot
+// see the table's DATA layout, and this is a perfect hash table: the build runs
+// a randomised parameter search, so a change can leave the lookup instruction
+// sequence byte-identical while picking a geometry that spreads the same keys
+// over more cache lines. That is a lookup regression no other check here sees.
+//
+// The values below are derived from slot INDICES rather than addresses, so they
+// do not move with address space randomisation, the CPU model, or where the
+// allocator happened to put the arrays. They still depend on the standard
+// library, like every other counter here, because the search that picks the
+// geometry draws from std::uniform_int_distribution. The footprint of the slot,
+// bucket and metadata arrays arrives on its own, in the allocation counters, so
+// only the layout figures need computing.
+//
+// The keys are the leading 20000 of the set tests/ci/perf_probe.cpp times, so
+// the deterministic geometry and the wall-clock report describe the same table.
+// Not the whole 100000: the arena above never reuses a freed block, so its
+// consumption scales with how many times the parameter search restarts, and a
+// search made harder on purpose has to fit too. Measured, both maps together:
+// 13 MiB of the 128 MiB arena at this size and the default load factor, and 51
+// MiB with the load factor raised to 0.9, where the search restarts far more.
+// At 100000 the same 0.9 run needs more than 768 MiB.
+
+const std::size_t kGeometryElements = 20000;
+
+std::vector<std::uint64_t> &GeometryKeys() {
+    static std::vector<std::uint64_t> keys = [] {
+        std::vector<std::uint64_t> v;
+        v.reserve(kGeometryElements);
+        DeterministicRng rng(0x1234);
+        for (std::size_t i = 0; i < kGeometryElements; ++i) {
+            v.push_back(rng.Next() | 1ull);
+        }
+        return v;
+    }();
+    return keys;
+}
+
+// Scratch for the slot positions. Held across calls so that its allocation
+// happens once, outside any counting window.
+std::vector<std::size_t> &GeometryScratch() {
+    static std::vector<std::size_t> v(kGeometryElements, 0);
+    return v;
+}
+
+template <class Map>
+void RunGeometry(const char *name) {
+    const std::vector<std::uint64_t> &keys = GeometryKeys();
+    std::vector<std::size_t> &pos = GeometryScratch();
+
+    std::size_t stride = 0;
+    std::size_t span = 0;
+    std::size_t buckets = 0;
+
+    g_workload = name;
+    ResetAlloc();
+    ResetKey();
+    g_counting = true;
+    {
+        Map m;
+        m.reserve(kGeometryElements);
+        for (std::size_t i = 0; i < keys.size(); ++i) {
+            m.insert(std::make_pair(keys[i], static_cast<std::uint64_t>(i)));
+        }
+        if (m.size() != keys.size()) {
+            std::fprintf(stderr, "counter_probe: %s size %zu != %zu\n",
+                         name, m.size(), keys.size());
+            std::exit(1);
+        }
+
+        for (std::size_t i = 0; i < keys.size(); ++i) {
+            pos[i] = m.GetSlotPos(keys[i]);
+        }
+
+        std::size_t lo = 0;
+        std::size_t hi = 0;
+        for (std::size_t i = 0; i < pos.size(); ++i) {
+            if (pos[i] < pos[lo]) lo = i;
+            if (pos[i] > pos[hi]) hi = i;
+        }
+        // The stride between slots, without reading a private typedef: two keys
+        // whose slot indices differ by N have addresses that differ by N
+        // strides. A difference of two addresses is a size, so it says nothing
+        // about where the allocation landed.
+        if (pos[hi] > pos[lo]) {
+            const char *low = reinterpret_cast<const char *>(m.GetPointerNoCheck(keys[lo]));
+            const char *high = reinterpret_cast<const char *>(m.GetPointerNoCheck(keys[hi]));
+            stride = static_cast<std::size_t>(high - low) / (pos[hi] - pos[lo]);
+        }
+        span = pos[hi] + 1;
+        buckets = m.bucket_count();
+    }
+    g_counting = false;
+    g_key_counting = false;
+
+    // How many distinct 64-byte lines a sweep of the whole key set touches.
+    // Counting distinct values does not depend on the order they are visited
+    // in, so the probe order does not need reproducing here.
+    std::size_t lines = 0;
+    if (stride != 0) {
+        std::sort(pos.begin(), pos.end());
+        std::size_t previous = 0;
+        for (std::size_t i = 0; i < pos.size(); ++i) {
+            std::size_t line = (pos[i] * stride) >> 6;
+            if (i == 0 || line != previous) {
+                ++lines;
+                previous = line;
+            }
+        }
+    }
+
+    ReportCounters(false);
+    std::printf("%s.slot_stride_bytes %zu\n", name, stride);
+    std::printf("%s.slot_span %zu\n", name, span);
+    std::printf("%s.bucket_count %zu\n", name, buckets);
+    std::printf("%s.cache_lines_touched %zu\n", name, lines);
+}
+
 }  // namespace
 
 int main() {
@@ -450,6 +571,13 @@ int main() {
 
     RunWorkload("dyn_map_counted_copy_2000", true, CopyCountedMap<DynCountedMap>);
     RunWorkload("meta_map_counted_copy_2000", true, CopyCountedMap<MetaCountedMap>);
+
+    // Touched before the counting windows open, so that the key set and the
+    // scratch buffer are not charged to a table.
+    GeometryKeys();
+    GeometryScratch();
+    RunGeometry<DynIntMap>("dyn_map_geometry_20000");
+    RunGeometry<MetaIntMap>("meta_map_geometry_20000");
 
     return 0;
 }

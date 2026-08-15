@@ -23,7 +23,7 @@ All of them take `--help`.
 | `ci / asan+ubsan` | the same tests under ASan and UBSan |
 | `lookup-guard / lookup asm` | the machine code of the lookup path |
 | `lookup-guard / sizeof` | `sizeof` and `alignof` of the containers and iterators |
-| `lookup-guard / counters` | allocations, bytes, peak footprint, key copies and moves |
+| `lookup-guard / counters` | allocations, bytes, peak footprint, key copies and moves, table geometry |
 | `lookup-guard / timing report` | nothing; it publishes numbers |
 
 The compile matrix is gcc and clang, C++17/20/23, on Linux x86-64, Linux arm64
@@ -91,6 +91,14 @@ skipped when it does not match.
 ```sh
 tests/ci/update-baselines.sh --counters
 ```
+
+The same probe reports the table's geometry for a fixed 20000-key set: the slot
+stride, the slot span, the bucket count, and how many distinct 64-byte lines a
+sweep of the key set touches. They are computed from slot indices rather than
+addresses, so no part of them depends on where an allocation landed. They exist
+because the asm gate proves the lookup *code* is unchanged and cannot see the
+*data layout*: the parameter search can pick a geometry that spreads the same
+keys over more cache lines while the disassembly stays byte-identical.
 
 ## Tests
 
