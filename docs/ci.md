@@ -27,8 +27,19 @@ All of them take `--help`.
 | `lookup-guard / timing report` | nothing; it publishes numbers |
 
 The compile matrix is gcc and clang, C++17/20/23, on Linux x86-64, Linux arm64
-and macOS arm64. The Linux arm64 cells are `continue-on-error` until that runner
-label has been seen working.
+and macOS arm64.
+
+`ctest` runs three configurations, because optimisation level and assertions are
+separate axes and a bug can hide in either gap: `Release` (`-O3 -DNDEBUG`),
+`O2-asserts` (`-O2`, assertions live), and `Debug` (`-O0`, assertions live). One
+defect in this library trips an assert at `-O0` and becomes heap corruption
+under `-DNDEBUG`.
+
+A `stress` job runs on a nightly schedule and on `workflow_dispatch`, never on a
+pull request. Its seed comes from the run number, so consecutive runs explore
+different configurations; the seed is in the job name and the harness prints a
+per-configuration recipe, so a failure can be replayed. Nothing carries the
+`stress` label yet.
 
 Timings are not gated. A shared runner cannot resolve the differences this
 library cares about, so the report is informational and prints the run's own

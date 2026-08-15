@@ -8,6 +8,9 @@ on:
     branches: [master]
   pull_request:
   workflow_dispatch:
+  schedule:
+    # 03:17 UTC. Off the hour so it does not queue behind everyone else's cron.
+    - cron: '17 3 * * *'
 
 permissions:
   contents: read
@@ -22,7 +25,6 @@ jobs:
   compile-matrix:
     name: compile ${{ matrix.os }} ${{ matrix.cxx }} ${{ matrix.std }}
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.experimental || false }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -36,18 +38,14 @@ jobs:
           - os: macos-15
             cxx: g++
         include:
-          # Linux on arm64. Marked experimental only because this repository has
-          # never run on that runner label; promote it to a hard gate as soon as
-          # one run is seen green. One known defect in this library passes on
-          # arm64 and crashes on x86-64, so the pair matters.
+          # Linux on arm64. One known defect in this library passes on arm64 and
+          # crashes on x86-64, so the pair earns its place.
           - os: ubuntu-24.04-arm
             cxx: g++
             std: c++17
-            experimental: true
           - os: ubuntu-24.04-arm
             cxx: clang++
             std: c++17
-            experimental: true
     steps:
       - uses: actions/checkout@v4
       - run: tests/ci/compile-matrix.sh --cxx ${{ matrix.cxx }} --std ${{ matrix.std }}
@@ -55,31 +53,59 @@ jobs:
   # The randomized correctness suite, the bit-array test, the sample and the API
   # smoke test, through ctest. Fewer cells than the compile matrix because each
   # one is minutes rather than seconds.
+  # Optimisation level and assertions are separate axes, and bugs live in the
+  # gap between them. One defect in this library trips an assert at -O0 and
+  # becomes heap corruption under -DNDEBUG, so a matrix that only pairs
+  # "-O0 with asserts" against "-O3 without" never sees it as memory unsafety.
+  # The library also type-puns through a union, which optimisers treat
+  # differently at -O0 and -O3. Hence four rows: unoptimised, optimised with
+  # asserts live, optimised without, on both compilers.
   tests:
-    name: ctest ${{ matrix.os }} ${{ matrix.cxx }} ${{ matrix.build_type }}
+    name: ctest ${{ matrix.os }} ${{ matrix.cxx }} ${{ matrix.config }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
         include:
+          # -O3, NDEBUG: what users ship.
           - os: ubuntu-24.04
             cxx: g++
-            build_type: Release
+            config: Release
+            cmake_args: -DCMAKE_BUILD_TYPE=Release
           - os: ubuntu-24.04
             cxx: clang++
-            build_type: Release
-          - os: ubuntu-24.04
-            cxx: g++
-            build_type: Debug
+            config: Release
+            cmake_args: -DCMAKE_BUILD_TYPE=Release
           - os: macos-15
             cxx: clang++
-            build_type: Release
+            config: Release
+            cmake_args: -DCMAKE_BUILD_TYPE=Release
+          # -O2 with assertions live: optimiser decisions of a release build,
+          # but the library's own invariant checks can still fire.
+          - os: ubuntu-24.04
+            cxx: g++
+            config: O2-asserts
+            cmake_args: -DCMAKE_BUILD_TYPE= -DCMAKE_CXX_FLAGS=-O2
+          - os: ubuntu-24.04
+            cxx: clang++
+            config: O2-asserts
+            cmake_args: -DCMAKE_BUILD_TYPE= -DCMAKE_CXX_FLAGS=-O2
+          # -O0 with assertions: no inlining, every check live. The slowest
+          # cells by far, and worth it — they run in parallel with the rest.
+          - os: ubuntu-24.04
+            cxx: g++
+            config: Debug
+            cmake_args: -DCMAKE_BUILD_TYPE=Debug
+          - os: ubuntu-24.04
+            cxx: clang++
+            config: Debug
+            cmake_args: -DCMAKE_BUILD_TYPE=Debug
     steps:
       - uses: actions/checkout@v4
-      - run: cmake -S tests -B build -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+      - run: cmake -S tests -B build -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} ${{ matrix.cmake_args }}
       - run: cmake --build build --parallel
-      - run: ctest --test-dir build --output-on-failure
+      - run: ctest --test-dir build --output-on-failure --parallel 2
 
   # AddressSanitizer + UndefinedBehaviorSanitizer over the same ctest set.
   # -fno-sanitize-recover=all is what turns a UBSan report into a failure
@@ -100,3 +126,29 @@ jobs:
           -DCMAKE_CXX_FLAGS="-O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined -fno-sanitize-recover=all"
       - run: cmake --build build --parallel
       - run: ctest --test-dir build --output-on-failure
+
+  # Randomised search for defects that only show up with low probability. Not on
+  # the pull request path: it runs for hours, and its value is in covering
+  # different ground each night rather than in gating one diff.
+  #
+  # The seed comes from the run number, so consecutive nights explore different
+  # configurations instead of re-testing the same ones forever. It is in the job
+  # name, and the harness prints a per-configuration recipe, so anything this
+  # finds can be replayed exactly rather than chased.
+  #
+  # Nothing carries the `stress` label yet — those tests arrive with the
+  # correctness work. Until then this job builds and finds no tests to run,
+  # which --no-tests=ignore makes a pass rather than an error.
+  stress:
+    name: stress (seed ${{ github.run_number }})
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - run: >
+          cmake -S tests -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DFPH_STRESS_SEED=${{ github.run_number }}
+      - run: cmake --build build --parallel
+      - run: ctest --test-dir build --output-on-failure -L stress --no-tests=ignore
