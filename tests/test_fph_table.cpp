@@ -6,6 +6,10 @@
 #include <unordered_map>
 #include <cstdio>
 #include <chrono>
+// std::exception_ptr and std::current_exception, used below, come from
+// <exception>. libc++ stopped providing it transitively in C++23, so without
+// this the file compiles at C++17/20 and fails at C++23 on macOS.
+#include <exception>
 #include <utility>
 #include <vector>
 #include <random>
