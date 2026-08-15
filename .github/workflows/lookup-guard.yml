@@ -91,6 +91,26 @@ jobs:
           fetch-depth: 0
       - run: tests/ci/check-counters.sh --cxx ${{ matrix.cxx }}
 
+  # Instructions executed and simulated D1 misses for the lookup loop itself.
+  # Catches what the asm gate structurally cannot: a runtime parameter or a
+  # different chosen geometry, which leave the machine code byte-identical.
+  # Linux only -- valgrind has no macOS arm64 port.
+  # Overridable with the allow-cost-increase label.
+  lookup-cost:
+    name: callgrind ubuntu-24.04 ${{ matrix.cxx }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        cxx: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: sudo apt-get update && sudo apt-get install -y valgrind
+      - run: tests/ci/check-callgrind.sh --cxx ${{ matrix.cxx }}
+
   # Timings. Cannot fail; publishes a table with the machine's own noise floor
   # and the threshold that implies printed next to every figure, so a reader can
   # check a claim rather than take one.

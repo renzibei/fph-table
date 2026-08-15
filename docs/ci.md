@@ -9,6 +9,7 @@ tests/ci/compile-matrix.sh
 tests/ci/check-asm.sh
 tests/ci/check-sizeof.sh
 tests/ci/check-counters.sh
+tests/ci/check-callgrind.sh
 tests/ci/perf-report.sh
 ```
 
@@ -24,6 +25,7 @@ All of them take `--help`.
 | `lookup-guard / lookup asm` | the machine code of the lookup path |
 | `lookup-guard / sizeof` | `sizeof` and `alignof` of the containers and iterators |
 | `lookup-guard / counters` | allocations, bytes, peak footprint, key copies and moves, table geometry |
+| `lookup-guard / callgrind` | instructions and simulated D1 misses in the lookup loop, Linux only |
 | `lookup-guard / timing report` | nothing; it publishes numbers |
 
 The compile matrix is gcc and clang, C++17/20/23, on Linux x86-64, Linux arm64
@@ -99,6 +101,31 @@ addresses, so no part of them depends on where an allocation landed. They exist
 because the asm gate proves the lookup *code* is unchanged and cannot see the
 *data layout*: the parameter search can pick a geometry that spreads the same
 keys over more cache lines while the disassembly stays byte-identical.
+
+## Callgrind
+
+`check-callgrind.sh` counts what one lookup loop executes, with the table built
+before the collection window opens so the parameter search is not in the count.
+Linux only: valgrind has no macOS arm64 port, and the script skips itself
+elsewhere. `-march` and the simulated cache geometry are pinned; both change the
+counts, and neither should be a property of the runner the job landed on.
+
+Instructions are compared for exact equality. Repeat runs are bit-identical, and
+a commit that touched only construction moved the count by 0.0000% in every
+scenario, so any movement is a real change of code path. Read it as a detector,
+not a speedometer: on the one known lookup improvement it moved between 0.76x
+and 3.85x the measured time change.
+
+Simulated D1 misses are compared as an upper bound with 1% of headroom, about
+ninety times the drift measured on a construction-only change. This is the
+counter that sees a runtime parameter: `max_load_factor` 0.6 to 0.9 leaves the
+disassembly byte-identical and moves D1 misses 8.6% and wall clock 9.2%.
+
+Branch simulation is off; valgrind's predictor is a 2004 bimodal model and
+reported 14 mispredicts per million probes here.
+
+Use the `allow-cost-increase` label, `[allow-cost-increase]` in a commit
+message, or `--allow-change` locally.
 
 ## Tests
 
