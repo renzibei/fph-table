@@ -95,9 +95,23 @@ fph_info "  head     : $INCLUDE"
 [ "$have_base" -eq 1 ] && fph_info "  base     : $BASE_REF"
 fph_info "  rounds   : $ROUNDS inner, $REPEATS outer"
 fph_info "  runner   : $(uname -s) $(uname -m)"
+
+# If the lookup path's machine code is byte-identical to the base revision then
+# no timing difference below can be real, whatever the numbers say. Ask the
+# deterministic check rather than leaving the reader to infer it: a timing
+# verdict that contradicts identical machine code is noise being dressed up as
+# a finding, and it teaches people to ignore this report.
+asm_identical=0
+if [ "$have_base" = 1 ] && [ -x "$SELF_DIR/check-asm.sh" ]; then
+    if "$SELF_DIR/check-asm.sh" --base "$BASE_REF" --cxx "$CXX" > "$WORK/asm.log" 2>&1 \
+            && grep -q "result: identical" "$WORK/asm.log"; then
+        asm_identical=1
+        fph_info "  lookup asm: identical to $BASE_REF -- no delta below can be real"
+    fi
+fi
 fph_rule
 
-awk -v have_base="$have_base" '
+awk -v have_base="$have_base" -v asm_identical="$asm_identical" '
 {
     arm = $1; scen = $2; v = $3 + 0
     key = arm "/" scen
@@ -105,9 +119,6 @@ awk -v have_base="$have_base" '
     seen[scen] = 1
 }
 END {
-    printf "%-14s %12s %12s %12s %10s %10s  %s\n",
-           "scenario", "base ns", "head ns", "control ns",
-           "head/base", "noise", "verdict"
     n = 0
     for (s in seen) order[++n] = s
     # deterministic ordering without asort(), which is a gawk extension
@@ -115,30 +126,50 @@ END {
         for (j = i + 1; j <= n; j++)
             if (order[j] < order[i]) { t = order[i]; order[i] = order[j]; order[j] = t }
 
+    # Noise is a property of the machine during this run, not of one scenario.
+    # head and control are the same bytes, so every scenario measures the same
+    # thing; when one of them happens to come out tight that is luck, not the
+    # runner going quiet for that scenario. Take the worst seen and hold every
+    # row to it, or a scenario with a lucky control invents a verdict.
+    worst = 0
+    for (i = 1; i <= n; i++) {
+        s = order[i]
+        h = best["head/" s] / 1000.0
+        c = best["control/" s] / 1000.0
+        nz = (h > 0) ? (c - h) / h * 100.0 : 0
+        if (nz < 0) nz = -nz
+        noise[s] = nz
+        if (nz > worst) worst = nz
+    }
+    floor = worst * 4
+    if (floor < 1.0) floor = 1.0
+
+    printf "%-14s %12s %12s %12s %10s %10s  %s\n",
+           "scenario", "base ns", "head ns", "control ns",
+           "head/base", "noise", "verdict"
+
     for (i = 1; i <= n; i++) {
         s = order[i]
         h = best["head/" s] / 1000.0
         c = best["control/" s] / 1000.0
         b = have_base ? best["base/" s] / 1000.0 : 0
 
-        noise = (h > 0) ? (c - h) / h * 100.0 : 0
-        if (noise < 0) noise = -noise
-
         if (have_base && b > 0) {
             delta = (h - b) / b * 100.0
             ad = delta < 0 ? -delta : delta
-            # "Worth a look" only past several times the floor this very run
-            # measured, and never below one percent.
-            floor = noise * 4
-            if (floor < 1.0) floor = 1.0
-            verdict = (ad > floor) ? "worth a look" : "indistinguishable from noise"
+            if (asm_identical)
+                verdict = "lookup code identical -- noise"
+            else
+                verdict = (ad > floor) ? "worth a look" : "indistinguishable from noise"
             printf "%-14s %12.3f %12.3f %12.3f %+9.2f%% %9.2f%%  %s\n",
-                   s, b, h, c, delta, noise, verdict
+                   s, b, h, c, delta, noise[s], verdict
         } else {
             printf "%-14s %12s %12.3f %12.3f %10s %9.2f%%  %s\n",
-                   s, "-", h, c, "-", noise, "no base to compare against"
+                   s, "-", h, c, "-", noise[s], "no base to compare against"
         }
     }
+    if (have_base)
+        printf "\nfloor for a verdict: %.2f%% (4x the worst noise measured this run)\n", floor
 }
 ' "$WORK/samples.txt" | tee "$WORK/table.txt"
 
