@@ -42,8 +42,12 @@ per-configuration recipe, so a failure can be replayed. Nothing carries the
 `stress` label yet.
 
 Timings are not gated. A shared runner cannot resolve the differences this
-library cares about, so the report is informational and prints the run's own
-measured noise alongside each figure.
+library cares about, so the report is informational. It prints the run's own
+measured noise alongside each figure, and the threshold that noise implies, and
+it states no verdict: a threshold can be checked against the numbers next to it,
+a verdict cannot. The report is posted as a comment on the pull request and
+rewritten in place on each push, as well as going to the job summary and an
+artifact.
 
 ## Lookup asm
 

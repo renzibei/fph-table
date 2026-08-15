@@ -92,16 +92,36 @@ jobs:
       - run: tests/ci/check-counters.sh --cxx ${{ matrix.cxx }}
 
   # Timings. Cannot fail; publishes a table with the machine's own noise floor
-  # printed next to every figure so a reader can tell signal from nothing.
+  # and the threshold that implies printed next to every figure, so a reader can
+  # check a claim rather than take one.
+  #
+  # The report is posted to the pull request itself. A job summary renders only
+  # on the workflow run page, which is two clicks away from the conversation,
+  # and a report nobody reads is worse than none: it teaches people to ignore
+  # the one run that matters.
   timing-report:
     name: timing report (informational)
     runs-on: ubuntu-24.04
     timeout-minutes: 40
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - run: tests/ci/perf-report.sh --markdown timing-report.md
+      # One comment per pull request, rewritten on each push rather than added
+      # to. continue-on-error because a pull request from a fork gets a
+      # read-only token whatever this file asks for; the summary and the
+      # artifact below are still there in that case.
+      - if: always() && github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh pr comment ${{ github.event.pull_request.number }}
+          --edit-last --create-if-none --body-file timing-report.md
       - run: cat timing-report.md >> "$GITHUB_STEP_SUMMARY"
         if: always()
       - uses: actions/upload-artifact@v4
