@@ -127,8 +127,31 @@ mkdir build
 cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j4
-./fph_table_tests
+ctest --output-on-failure
 ```
+
+`ctest` runs the randomized correctness suite together with the bit-array test,
+the sample program and an API smoke test. The minutes-long benchmark is not part
+of it; configure with `-DFPH_ENABLE_BENCHMARK_TEST=ON` to register that too, or
+run `./fph_table_tests --benchmark` directly.
+
+## Continuous integration
+
+Pull requests are checked by two workflows, both of which are thin wrappers
+around scripts in `tests/ci/` that you can run yourself without pushing:
+
+```
+tests/ci/compile-matrix.sh     # headers must compile clean, -Wall -Wextra -Werror
+tests/ci/check-asm.sh          # the lookup path's machine code must not get longer
+tests/ci/check-sizeof.sh       # the containers must stay exactly the size they are
+tests/ci/check-counters.sh     # construction must not allocate or copy more
+tests/ci/perf-report.sh        # timings, as a report; nothing gates on wall-clock
+```
+
+Lookup cost is gated on disassembly rather than on timings, because a shared CI
+runner cannot resolve the differences that matter here. `docs/ci.md` explains
+what each job gates, how to update a baseline on purpose, and how to sign off a
+deliberate change to the lookup path.
 
 ## Usage
 
