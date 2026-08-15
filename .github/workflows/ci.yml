@@ -1,0 +1,102 @@
+# Build and test. Every step here is one line that runs a script from tests/ci
+# or a stock cmake/ctest invocation, so the whole thing can be reproduced on a
+# laptop without pushing anything. See docs/ci.md.
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The library headers must compile clean, with warnings as errors, everywhere.
+  # This is the cheap wide net: ~10 seconds a cell.
+  compile-matrix:
+    name: compile ${{ matrix.os }} ${{ matrix.cxx }} ${{ matrix.std }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.experimental || false }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+        cxx: [g++, clang++]
+        std: [c++17, c++20, c++23]
+        exclude:
+          # There is no system g++ on the macOS image; Apple clang is the
+          # compiler there and is covered by the clang++ row.
+          - os: macos-15
+            cxx: g++
+        include:
+          # Linux on arm64. Marked experimental only because this repository has
+          # never run on that runner label; promote it to a hard gate as soon as
+          # one run is seen green. One known defect in this library passes on
+          # arm64 and crashes on x86-64, so the pair matters.
+          - os: ubuntu-24.04-arm
+            cxx: g++
+            std: c++17
+            experimental: true
+          - os: ubuntu-24.04-arm
+            cxx: clang++
+            std: c++17
+            experimental: true
+    steps:
+      - uses: actions/checkout@v4
+      - run: tests/ci/compile-matrix.sh --cxx ${{ matrix.cxx }} --std ${{ matrix.std }}
+
+  # The randomized correctness suite, the bit-array test, the sample and the API
+  # smoke test, through ctest. Fewer cells than the compile matrix because each
+  # one is minutes rather than seconds.
+  tests:
+    name: ctest ${{ matrix.os }} ${{ matrix.cxx }} ${{ matrix.build_type }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            cxx: g++
+            build_type: Release
+          - os: ubuntu-24.04
+            cxx: clang++
+            build_type: Release
+          - os: ubuntu-24.04
+            cxx: g++
+            build_type: Debug
+          - os: macos-15
+            cxx: clang++
+            build_type: Release
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S tests -B build -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+      - run: cmake --build build --parallel
+      - run: ctest --test-dir build --output-on-failure
+
+  # AddressSanitizer + UndefinedBehaviorSanitizer over the same ctest set.
+  # -fno-sanitize-recover=all is what turns a UBSan report into a failure
+  # instead of a line of output nobody reads.
+  sanitizers:
+    name: asan+ubsan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      ASAN_OPTIONS: detect_leaks=1:abort_on_error=0
+      UBSAN_OPTIONS: print_stacktrace=1
+    steps:
+      - uses: actions/checkout@v4
+      - run: >
+          cmake -S tests -B build
+          -DCMAKE_CXX_COMPILER=clang++
+          -DCMAKE_BUILD_TYPE=
+          -DCMAKE_CXX_FLAGS="-O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined -fno-sanitize-recover=all"
+      - run: cmake --build build --parallel
+      - run: ctest --test-dir build --output-on-failure

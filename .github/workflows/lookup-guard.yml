@@ -1,0 +1,111 @@
+# The performance gates.
+#
+# Wall-clock cannot gate anything on a shared runner, so nothing here is timed
+# except the report at the bottom, which cannot fail. What gates is machine code,
+# struct sizes and exact operation counts -- all of them integers.
+#
+# Every gate compares this revision against the pull request's base revision,
+# built in the same job with the same compiler. Nothing is compared against a
+# number recorded on someone else's machine, so upgrading a runner image cannot
+# turn a pull request red on its own.
+name: lookup-guard
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: revision to compare against
+        required: false
+        default: master
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lookup-guard-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The scripts read these; the workflow's only job is to fill them in from the
+  # event payload. Keep the logic in tests/ci, not here.
+  FPH_CI_BASE_REF: ${{ github.event.pull_request.base.sha || inputs.base || 'master' }}
+  FPH_CI_PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ' ') }}
+
+jobs:
+  # Does the lookup path's machine code change? Identical passes, shorter passes
+  # and says so, anything else fails and prints the instruction-level diff.
+  # Overridable with the allow-lookup-asm-change label.
+  lookup-asm:
+    name: lookup asm ${{ matrix.os }} ${{ matrix.cxx }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            cxx: g++
+          - os: ubuntu-24.04
+            cxx: clang++
+          - os: macos-15
+            cxx: clang++
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: tests/ci/check-asm.sh --cxx ${{ matrix.cxx }}
+
+  # Exact sizes of every container, against the recorded baseline. Both growing
+  # and shrinking fail; update tests/ci/baselines/sizeof.txt on purpose.
+  container-sizeof:
+    name: sizeof ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    steps:
+      - uses: actions/checkout@v4
+      - run: tests/ci/check-sizeof.sh
+
+  # Allocations, bytes, peak footprint and key copies/moves for fixed workloads,
+  # as upper bounds. An improvement passes with no baseline edit.
+  # Overridable with the allow-cost-increase label.
+  construction-cost:
+    name: counters ${{ matrix.os }} ${{ matrix.cxx }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            cxx: g++
+          - os: macos-15
+            cxx: clang++
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: tests/ci/check-counters.sh --cxx ${{ matrix.cxx }}
+
+  # Timings. Cannot fail; publishes a table with the machine's own noise floor
+  # printed next to every figure so a reader can tell signal from nothing.
+  timing-report:
+    name: timing report (informational)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: tests/ci/perf-report.sh --markdown timing-report.md
+      - run: cat timing-report.md >> "$GITHUB_STEP_SUMMARY"
+        if: always()
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: timing-report
+          path: timing-report.md
