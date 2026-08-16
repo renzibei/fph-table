@@ -142,16 +142,16 @@ around scripts in `tests/ci/` that you can run yourself without pushing:
 
 ```
 tests/ci/compile-matrix.sh     # headers must compile clean, -Wall -Wextra -Werror
-tests/ci/check-asm.sh          # the lookup path's machine code must not get longer
+tests/ci/check-asm.sh          # the lookup path's machine code must not change
 tests/ci/check-sizeof.sh       # the containers must stay exactly the size they are
 tests/ci/check-counters.sh     # construction must not allocate or copy more
-tests/ci/perf-report.sh        # timings, as a report; nothing gates on wall-clock
+tests/ci/check-callgrind.sh    # the lookup loop's instruction and cache-miss counts
 ```
 
-Lookup cost is gated on disassembly rather than on timings, because a shared CI
-runner cannot resolve the differences that matter here. `docs/ci.md` explains
-what each job gates, how to update a baseline on purpose, and how to sign off a
-deliberate change to the lookup path.
+Lookup cost is gated on disassembly and on simulated counts rather than on
+timings, because a shared CI runner cannot resolve the differences that matter
+here. `docs/ci.md` explains what each job gates, how to update a baseline on
+purpose, and how to sign off a deliberate change to the lookup path.
 
 ## Usage
 

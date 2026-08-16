@@ -10,21 +10,22 @@ implement the same table twice. A fix usually belongs in both.
 
 ## What the checks decide
 
-Four checks are deterministic: lookup asm, `sizeof`, the construction and
+Four checks gate a pull request: lookup asm, `sizeof`, the construction and
 geometry counters, and callgrind. Each compares this revision against the pull
 request's base revision built in the same job, and each produces exact integers,
 so a difference is a real change and not a bad minute on the runner.
 
-If one of them fails, either the change goes back out or it is signed off in the
-same branch: add the label the failure message names, or put its marker in a
-commit message, and say in the pull request why the new cost is the right trade.
-Both leave a record on the pull request. Do not disable a check.
+A red check means one of them measured a difference. Either the change goes back
+out, or it is signed off: add the label that the failure message names, and say
+in the pull request why the new cost is the right trade. Each label waives one
+gate, adding one needs write access, and a waived gate is annotated on the run
+rather than rendered as a pass. Do not disable a check.
 
-The timing report is not one of these. It cannot fail a build and it is not on
-its own a reason to hold a pull request: wall clock on a shared runner cannot
-resolve the differences this library cares about. The report prints the noise it
-measured during that run and the threshold that implies, so a figure can be
-checked. If one looks real, reproduce it on a quiet machine before acting.
+The same workflows also run on pushes to `master`. Those runs compare against
+the pushed commit's predecessor, and the commit has already landed, so they
+report rather than gate — they are what notices a direct push that should have
+been a pull request. On the first push of a branch there is nothing to compare
+against; the gates say so and measure nothing.
 
 ## Before opening a pull request
 
