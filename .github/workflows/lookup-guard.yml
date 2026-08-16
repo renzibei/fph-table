@@ -52,13 +52,23 @@ env:
   # longer one.
   FPH_CI_PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
   # Report rather than gate when the commit under test has already landed: every
-  # push to the default branch, and a manual run on it. Such a run carries no
-  # pull request and so no labels, so re-measuring a difference that a pull
-  # request signed off would turn master red on every merge, and would leave a
-  # manual re-run of master permanently red with no way to sign it off. There a
-  # measured difference is a warning annotation and the job stays green. A
-  # measurement that could not be taken still fails, on every event.
-  FPH_CI_REPORT_ONLY: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) }}
+  # push to master, and a manual run on it. Such a run carries no pull request
+  # and so no labels, so re-measuring a difference that a pull request signed off
+  # would turn master red on every merge, and would leave a manual re-run of
+  # master permanently red with no way to sign it off. There a measured
+  # difference is a warning annotation and the job stays green. A measurement
+  # that could not be taken still fails, on every event.
+  #
+  # The branch is named literally, the same way `push: branches: [master]` above
+  # names it, because that trigger cannot be written any other way and one
+  # convention in one file is worth more than a clever expression. This used to
+  # read `format('refs/heads/{0}', github.event.repository.default_branch)`,
+  # which assumes that field is populated on a workflow_dispatch payload; if it
+  # ever were not, the comparison would quietly never match and a manual run on
+  # master would gate and go red with no label able to sign it off. Renaming the
+  # default branch desynchronises the trigger above either way, so both lines
+  # have to be edited together and they are eight lines apart.
+  FPH_CI_REPORT_ONLY: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master') }}
 
 jobs:
   # Does the lookup path's machine code change? Identical passes; anything else
