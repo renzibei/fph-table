@@ -160,12 +160,17 @@ for cxx in $CXX_LIST; do
     # so no other job would have caught it.
     dump head "$HEAD_INCLUDE" "$WORK/head.raw" "this revision"
 
-    # Announced after the loop, not here: exiting from inside it would drop a
-    # compiler this job asked for and did not find, which is a cell that never
-    # ran and has to outrank "there was nothing to compare against".
+    # Announced after the loop, not here, and carried on rather than broken out
+    # of: leaving the loop at all would drop a compiler this job asked for and
+    # did not find, which is a cell that never ran and has to outrank "there was
+    # nothing to compare against". Measured with `break` here: --cxx c++ --cxx
+    # nosuch-c++ with no base exited 0 and never looked at the second name,
+    # while the same two in the other order exited 2. The remaining compilers
+    # still have their head side disassembled, which is what shows each of them
+    # can build the probe at all.
     if [ "$HAVE_BASE" = 0 ]; then
         no_base=1
-        break
+        continue
     fi
 
     fph_info "  base : $BASE_LABEL"
