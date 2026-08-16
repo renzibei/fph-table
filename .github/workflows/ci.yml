@@ -48,6 +48,8 @@ jobs:
             std: c++17
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - run: tests/ci/compile-matrix.sh --cxx ${{ matrix.cxx }} --std ${{ matrix.std }}
 
   # The randomized correctness suite, the bit-array test, the sample and the API
@@ -103,6 +105,8 @@ jobs:
             cmake_args: -DCMAKE_BUILD_TYPE=Debug
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - run: cmake -S tests -B build -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} ${{ matrix.cmake_args }}
       - run: cmake --build build --parallel
       - run: ctest --test-dir build --output-on-failure --parallel 2
@@ -119,6 +123,8 @@ jobs:
       UBSAN_OPTIONS: print_stacktrace=1
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - run: >
           cmake -S tests -B build
           -DCMAKE_CXX_COMPILER=clang++
@@ -126,29 +132,3 @@ jobs:
           -DCMAKE_CXX_FLAGS="-O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined -fno-sanitize-recover=all"
       - run: cmake --build build --parallel
       - run: ctest --test-dir build --output-on-failure
-
-  # Randomised search for defects that only show up with low probability. Not on
-  # the pull request path: it runs for hours, and its value is in covering
-  # different ground each night rather than in gating one diff.
-  #
-  # The seed comes from the run number, so consecutive nights explore different
-  # configurations instead of re-testing the same ones forever. It is in the job
-  # name, and the harness prints a per-configuration recipe, so anything this
-  # finds can be replayed exactly rather than chased.
-  #
-  # Nothing carries the `stress` label yet — those tests arrive with the
-  # correctness work. Until then this job builds and finds no tests to run,
-  # which --no-tests=ignore makes a pass rather than an error.
-  stress:
-    name: stress (seed ${{ github.run_number }})
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 360
-    steps:
-      - uses: actions/checkout@v4
-      - run: >
-          cmake -S tests -B build
-          -DCMAKE_BUILD_TYPE=Release
-          -DFPH_STRESS_SEED=${{ github.run_number }}
-      - run: cmake --build build --parallel
-      - run: ctest --test-dir build --output-on-failure -L stress --no-tests=ignore
