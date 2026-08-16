@@ -4,15 +4,24 @@
 # fph_resolve_base_ref [explicit] -- decide which revision to compare against.
 #
 # Order of preference:
-#   1. the argument, if given
-#   2. $FPH_CI_BASE_REF          -- what the workflow sets from the event payload
-#   3. merge-base with origin/master, then master
-#   4. HEAD~1                    -- so a local `git commit; check` loop works
+#   1. the argument, if given    -- a revision, used exactly as written
+#   2. $FPH_CI_BASE_REF          -- a revision; the workflow sets it on a push
+#   3. $FPH_CI_BASE_BRANCH       -- a branch; the merge base with it. The
+#                                   workflow sets it on a pull request.
+#   4. the merge base with origin/master, then master
+#   5. HEAD~1, when the merge base above is HEAD itself
 #
 # Prints the resolved sha and returns 0. Returns 3 for "no base was named",
 # which the caller announces and finishes without a measurement. Returns 1 when
 # a base WAS named and cannot be found: that is a broken configuration, not an
 # absent predecessor, and it fails.
+#
+# On a pull request the base has to be the merge base and not the base sha from
+# the event payload. That sha is a snapshot taken when the payload was written,
+# while refs/pull/N/merge is recomputed whenever the target branch moves, so as
+# soon as master advances the two disagree and the gate charges the pull request
+# with master's change. Reproduced: a comment-only pull request failed the asm
+# gate for a mask change that had landed on master after it was opened.
 #
 # A base that resolves to HEAD is reported as 3, not as a comparison. Building
 # the same revision twice produces an identical result whatever the revision
@@ -27,6 +36,20 @@ fph_resolve_base_ref() {
         candidate=$explicit
     elif [ -n "${FPH_CI_BASE_REF:-}" ]; then
         candidate=$FPH_CI_BASE_REF
+    elif [ -n "${FPH_CI_BASE_BRANCH:-}" ]; then
+        # A checkout has the branch as a remote-tracking ref, not a local one.
+        for probe in "origin/$FPH_CI_BASE_BRANCH" "$FPH_CI_BASE_BRANCH"; do
+            if git -C "$FPH_ROOT" rev-parse --verify --quiet "$probe" >/dev/null 2>&1; then
+                if candidate=$(git -C "$FPH_ROOT" merge-base HEAD "$probe" 2>/dev/null); then
+                    break
+                fi
+                candidate=""
+            fi
+        done
+        if [ -z "$candidate" ]; then
+            fph_error "no merge base between HEAD and the base branch $FPH_CI_BASE_BRANCH"
+            return 1
+        fi
     else
         for probe in origin/master master origin/main main; do
             if git -C "$FPH_ROOT" rev-parse --verify --quiet "$probe" >/dev/null 2>&1; then
@@ -36,9 +59,16 @@ fph_resolve_base_ref() {
                 candidate=""
             fi
         done
-        if [ -z "$candidate" ] &&
-                git -C "$FPH_ROOT" rev-parse --verify --quiet HEAD~1 >/dev/null 2>&1; then
-            candidate=HEAD~1
+        # On master itself the merge base IS HEAD, which measures nothing. The
+        # useful comparison there is the commit before, which is also what a
+        # local `git commit; check` loop wants. Not when the tree is dirty:
+        # there HEAD is the right base and the edits on disk are the head side.
+        if [ -z "$candidate" ] ||
+                { [ "$candidate" = "$(git -C "$FPH_ROOT" rev-parse HEAD 2>/dev/null)" ] &&
+                  git -C "$FPH_ROOT" diff --quiet HEAD -- include 2>/dev/null; }; then
+            if git -C "$FPH_ROOT" rev-parse --verify --quiet HEAD~1 >/dev/null 2>&1; then
+                candidate=HEAD~1
+            fi
         fi
     fi
 

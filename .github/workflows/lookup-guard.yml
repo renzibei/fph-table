@@ -4,23 +4,22 @@
 # operation counts, all of them integers. Every gate compares this revision
 # against a base revision built in the same job with the same compiler, so
 # upgrading a runner image moves both sides at once.
-#
-# On a pull request the base is the merge base. On a push it is the event's
-# predecessor, and the commit has already landed, so a push-triggered run
-# reports rather than gates. Where there is no predecessor the gate says so and
-# does not report a measurement it did not take.
 name: lookup-guard
 
 on:
+  # labeled and unlabeled are not in the default set. Without them, adding the
+  # sign-off label a failure message asks for starts no run, and re-running the
+  # failed one replays the payload it already had, so the label never takes
+  # effect and the only way past the gate is another commit.
   pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches: [master]
   workflow_dispatch:
     inputs:
       base:
-        description: revision to compare against
+        description: revision to compare against; the merge base with master if empty
         required: false
-        default: master
 
 permissions:
   contents: read
@@ -33,16 +32,26 @@ env:
   # The scripts read these; the workflow's only job is to fill them in from the
   # event payload. Keep the logic in tests/ci, not here.
   #
-  # The base differs per event and there is no default: a base that falls
-  # through to the current revision makes every gate compare the revision
-  # against itself and pass.
-  FPH_CI_BASE_REF: >-
-    ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha
-    || github.event_name == 'push' && github.event.before
-    || inputs.base }}
+  # On a pull request the base is the branch, and the script takes the merge
+  # base with it. Not the base sha in the payload: that is a snapshot from when
+  # the payload was written, while refs/pull/N/merge is recomputed whenever
+  # master moves, so the two drift apart and the gate charges the pull request
+  # with master's changes.
+  FPH_CI_BASE_BRANCH: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.ref || '' }}
+  # On a push it is the event's predecessor. On a manual run it is whatever was
+  # typed, and empty means the script works it out -- there is no default here,
+  # because a checkout has origin/master and no local master, so a default of
+  # "master" resolves to nothing on a branch and to HEAD on master.
+  FPH_CI_BASE_REF: ${{ github.event_name == 'push' && github.event.before || inputs.base }}
   # The JSON array, so a label is matched whole rather than as a substring of a
   # longer one.
   FPH_CI_PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+  # A push carries no pull request and so no labels, and the commit has already
+  # landed. Re-measuring a difference a pull request signed off would turn
+  # master red on every merge, so on a push a measured difference is a warning
+  # annotation and the job stays green. A measurement that could not be taken
+  # still fails.
+  FPH_CI_REPORT_ONLY: ${{ github.event_name == 'push' }}
 
 jobs:
   # Does the lookup path's machine code change? Identical passes; anything else
