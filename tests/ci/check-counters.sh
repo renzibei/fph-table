@@ -114,8 +114,10 @@ measure head "$INCLUDE" "$WORK/head.txt"
 if [ "$PRINT_ONLY" = "1" ]; then
     # Only --print uses the toolchain tag, and a compiler that will not report
     # its predefined macros still compiles and still counts. Not being able to
-    # name it is not a reason to fail the gate.
-    TAG=$(fph_toolchain_tag "$CXX") || TAG="unidentified toolchain"
+    # name it is not a reason to fail the gate, and it is not an error either:
+    # it is said here, in the header line, where the numbers it qualifies are.
+    TAG=$(fph_toolchain_tag "$CXX") ||
+        TAG="unidentified ($CXX did not report its predefined macros)"
     fph_info "# toolchain: $TAG"
     fph_info "# flags: $BUILD_STD $BUILD_FLAGS"
     cat "$WORK/head.txt"

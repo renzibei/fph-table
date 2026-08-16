@@ -27,10 +27,11 @@ fph_default_compilers() {
     done | awk '!seen[$0]++'
 }
 
-# fph_platform_tag -- identifies the baseline file that applies here.
-# Allocation counts and struct sizes are properties of a (libstdc++ vs libc++,
-# pointer size, arch) combination, so baselines are stored per platform rather
-# than pretending one number fits all.
+# fph_platform_tag -- the operating system and architecture, as one word.
+# The first half of fph_toolchain_tag, which is what --print puts above a set of
+# numbers so that two people comparing output can see whether they measured the
+# same thing. It names no file: there is one recorded baseline,
+# tests/ci/baselines/sizeof.txt, and it holds on every LP64 target measured.
 fph_platform_tag() {
     os=$(uname -s | tr '[:upper:]' '[:lower:]')
     arch=$(uname -m)
@@ -45,7 +46,9 @@ fph_platform_tag() {
 # Read from the compiler's own predefined macros rather than from the --version
 # banner. Ubuntu's `c++` prints "c++ (Ubuntu 13.3.0-...) 13.3.0", which names
 # neither gcc nor GCC, and `c++` is what CONTRIBUTING.md tells contributors to
-# run. Fails rather than guessing.
+# run. Returns 1 rather than guessing, and says nothing on the way out: the only
+# callers are the --print paths, which carry on with a placeholder, and a
+# recovered path that prints "error:" reads as a failure that did not happen.
 fph_toolchain_tag() {
     cxx=$1
     macros=$(printf '' | "$cxx" -x c++ -E -dM - 2>/dev/null) || macros=""
@@ -62,7 +65,6 @@ fph_toolchain_tag() {
         version=$(printf '%s\n' "$macros" | awk '$2 == "__GNUC__" { print $3 }')
     fi
     if [ -z "$family" ] || [ -z "$version" ]; then
-        fph_error "cannot identify the compiler $cxx from its predefined macros"
         return 1
     fi
     printf '%s-%s%s\n' "$(fph_platform_tag)" "$family" "$version"
