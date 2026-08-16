@@ -1,0 +1,145 @@
+# Build and test. Every step here is one line that runs a script from tests/ci
+# or a stock cmake/ctest invocation, so the whole thing can be reproduced on a
+# laptop without pushing anything. See docs/ci.md.
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # 03:17 UTC. Off the hour so it does not queue behind everyone else's cron.
+    - cron: '17 3 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The library headers must compile clean, with warnings as errors, everywhere.
+  # This is the cheap wide net: ~10 seconds a cell.
+  compile-matrix:
+    name: compile ${{ matrix.os }} ${{ matrix.cxx }} ${{ matrix.std }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+        cxx: [g++, clang++]
+        std: [c++17, c++20, c++23]
+        exclude:
+          # There is no system g++ on the macOS image; Apple clang is the
+          # compiler there and is covered by the clang++ row.
+          - os: macos-15
+            cxx: g++
+        include:
+          # Linux on arm64. One known defect in this library passes on arm64 and
+          # crashes on x86-64, so the pair earns its place.
+          - os: ubuntu-24.04-arm
+            cxx: g++
+            std: c++17
+          - os: ubuntu-24.04-arm
+            cxx: clang++
+            std: c++17
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: tests/ci/compile-matrix.sh --cxx ${{ matrix.cxx }} --std ${{ matrix.std }}
+
+  # The randomized correctness suite, the bit-array test, the sample and the API
+  # smoke test, through ctest. Fewer cells than the compile matrix because each
+  # one is minutes rather than seconds.
+  # Optimisation level and assertions are separate axes, and bugs live in the
+  # gap between them. One defect in this library trips an assert at -O0 and
+  # becomes heap corruption under -DNDEBUG, so a matrix that only pairs
+  # "-O0 with asserts" against "-O3 without" never sees it as memory unsafety.
+  # The library also type-puns through a union, which optimisers treat
+  # differently at -O0 and -O3. Hence four rows: unoptimised, optimised with
+  # asserts live, optimised without, on both compilers.
+  tests:
+    name: ctest ${{ matrix.os }} ${{ matrix.cxx }} ${{ matrix.config }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # -O3, NDEBUG: what users ship.
+          - os: ubuntu-24.04
+            cxx: g++
+            config: Release
+            cmake_args: -DCMAKE_BUILD_TYPE=Release
+          - os: ubuntu-24.04
+            cxx: clang++
+            config: Release
+            cmake_args: -DCMAKE_BUILD_TYPE=Release
+          - os: macos-15
+            cxx: clang++
+            config: Release
+            cmake_args: -DCMAKE_BUILD_TYPE=Release
+          # -O2 with assertions live: optimiser decisions of a release build,
+          # but the library's own invariant checks can still fire.
+          - os: ubuntu-24.04
+            cxx: g++
+            config: O2-asserts
+            cmake_args: -DCMAKE_BUILD_TYPE= -DCMAKE_CXX_FLAGS=-O2
+          - os: ubuntu-24.04
+            cxx: clang++
+            config: O2-asserts
+            cmake_args: -DCMAKE_BUILD_TYPE= -DCMAKE_CXX_FLAGS=-O2
+          # -O0 with assertions: no inlining, every check live. The slowest
+          # cells by far, and worth it — they run in parallel with the rest.
+          - os: ubuntu-24.04
+            cxx: g++
+            config: Debug
+            cmake_args: -DCMAKE_BUILD_TYPE=Debug
+          - os: ubuntu-24.04
+            cxx: clang++
+            config: Debug
+            cmake_args: -DCMAKE_BUILD_TYPE=Debug
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: cmake -S tests -B build -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} ${{ matrix.cmake_args }}
+      - run: cmake --build build --parallel
+      # --no-tests=error, or the job passes when there is nothing to run.
+      # Measured on cmake 3.28.3 and 4.2.1: a build with no registered test
+      # prints "No tests were found!!!" and exits 0, and so do `-R` and `-L`
+      # with a selector that matches nothing. Deleting every add_test in
+      # tests/CMakeLists.txt left this job green.
+      #
+      # The flag needs cmake 3.26. This image carries 3.31.6 -- 3.28.3 is what
+      # Ubuntu ships in apt, which is not where the image's cmake comes from.
+      # An older ctest does not reject the flag, it ignores it: measured on
+      # 3.16.9, the run is byte-identical to plain ctest and exits 0 with no
+      # tests registered, so the protection would vanish silently.
+      - run: ctest --test-dir build --output-on-failure --parallel 2 --no-tests=error
+
+  # AddressSanitizer + UndefinedBehaviorSanitizer over the same ctest set.
+  # -fno-sanitize-recover=all is what turns a UBSan report into a failure
+  # instead of a line of output nobody reads.
+  sanitizers:
+    name: asan+ubsan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      ASAN_OPTIONS: detect_leaks=1:abort_on_error=0
+      UBSAN_OPTIONS: print_stacktrace=1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: >
+          cmake -S tests -B build
+          -DCMAKE_CXX_COMPILER=clang++
+          -DCMAKE_BUILD_TYPE=
+          -DCMAKE_CXX_FLAGS="-O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined -fno-sanitize-recover=all"
+      - run: cmake --build build --parallel
+      - run: ctest --test-dir build --output-on-failure --no-tests=error

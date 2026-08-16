@@ -1,0 +1,155 @@
+# The performance gates.
+#
+# Nothing here is timed. What gates is machine code, struct sizes and exact
+# operation counts, all of them integers. Every gate compares this revision
+# against a base revision built in the same job with the same compiler, so
+# upgrading a runner image moves both sides at once.
+name: lookup-guard
+
+on:
+  # labeled and unlabeled are not in the default set. Without them, adding the
+  # sign-off label a failure message asks for starts no run, and re-running the
+  # failed one replays the payload it already had, so the label never takes
+  # effect and the only way past the gate is another commit.
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      base:
+        description: >-
+          revision to compare against, as a sha or HEAD~1. Empty takes the merge
+          base with master, and on master the commit before. Naming the branch
+          being run, master included, names this same revision and fails.
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lookup-guard-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The scripts read these; the workflow's only job is to fill them in from the
+  # event payload. Keep the logic in tests/ci, not here.
+  #
+  # On a pull request the base is the branch, and the script takes the merge
+  # base with it. Not the base sha in the payload: that is a snapshot from when
+  # the payload was written, while refs/pull/N/merge is recomputed whenever
+  # master moves, so the two drift apart and the gate charges the pull request
+  # with master's changes.
+  FPH_CI_BASE_BRANCH: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.ref || '' }}
+  # On a push it is the event's predecessor. On a manual run it is whatever was
+  # typed, and empty means the script works it out -- there is no default here,
+  # because a checkout has origin/master and no local master, so a default of
+  # "master" resolves to nothing on a branch and to HEAD on master. Naming the
+  # branch that is checked out now fails with a message saying so, rather than
+  # announcing that there was nothing to compare against and exiting 0.
+  FPH_CI_BASE_REF: ${{ github.event_name == 'push' && github.event.before || inputs.base }}
+  # The JSON array, so a label is matched whole rather than as a substring of a
+  # longer one.
+  FPH_CI_PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+  # Report rather than gate when the commit under test has already landed: every
+  # push to master, and a manual run on it. Such a run carries no pull request
+  # and so no labels, so re-measuring a difference that a pull request signed off
+  # would turn master red on every merge, and would leave a manual re-run of
+  # master permanently red with no way to sign it off. There a measured
+  # difference is a warning annotation and the job stays green. A measurement
+  # that could not be taken still fails, on every event.
+  #
+  # The branch is named literally, the same way `push: branches: [master]` above
+  # names it, because that trigger cannot be written any other way and one
+  # convention in one file is worth more than a clever expression. This used to
+  # read `format('refs/heads/{0}', github.event.repository.default_branch)`,
+  # which assumes that field is populated on a workflow_dispatch payload; if it
+  # ever were not, the comparison would quietly never match and a manual run on
+  # master would gate and go red with no label able to sign it off. Renaming the
+  # default branch desynchronises the trigger above either way, so both lines
+  # have to be edited together and they are eight lines apart.
+  FPH_CI_REPORT_ONLY: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master') }}
+
+jobs:
+  # Does the lookup path's machine code change? Identical passes; anything else
+  # fails, in either direction. Overridable with the allow-lookup-asm-change
+  # label.
+  lookup-asm:
+    name: lookup asm ${{ matrix.os }} ${{ matrix.cxx }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            cxx: g++
+          - os: ubuntu-24.04
+            cxx: clang++
+          - os: macos-15
+            cxx: clang++
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: tests/ci/check-asm.sh --cxx ${{ matrix.cxx }}
+
+  # Exact sizes of every container, against the recorded baseline. Both growing
+  # and shrinking fail; update tests/ci/baselines/sizeof.txt on purpose.
+  container-sizeof:
+    name: sizeof ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: tests/ci/check-sizeof.sh
+
+  # Allocations, bytes, peak footprint, key copies/moves and the table geometry
+  # for fixed workloads, as upper bounds. An improvement passes with no baseline
+  # edit. Overridable with the allow-construction-cost-increase label.
+  construction-cost:
+    name: counters ${{ matrix.os }} ${{ matrix.cxx }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            cxx: g++
+          - os: macos-15
+            cxx: clang++
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: tests/ci/check-counters.sh --cxx ${{ matrix.cxx }}
+
+  # Instructions executed and simulated D1 misses for the lookup loop itself.
+  # Catches what the asm gate structurally cannot: a runtime parameter or a
+  # different chosen geometry, which leave the machine code byte-identical.
+  # Linux only -- valgrind has no macOS arm64 port.
+  # Overridable with the allow-lookup-cost-increase label.
+  lookup-cost:
+    name: callgrind ubuntu-24.04 ${{ matrix.cxx }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        cxx: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: sudo apt-get update && sudo apt-get install -y valgrind
+      - run: tests/ci/check-callgrind.sh --cxx ${{ matrix.cxx }}

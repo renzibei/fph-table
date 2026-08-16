@@ -6,6 +6,10 @@
 #include <unordered_map>
 #include <cstdio>
 #include <chrono>
+// std::exception_ptr and std::current_exception, used below, come from
+// <exception>. libc++ stopped providing it transitively in C++23, so without
+// this the file compiles at C++17/20 and fails at C++23 on macOS.
+#include <exception>
 #include <utility>
 #include <vector>
 #include <random>
@@ -204,6 +208,10 @@ std::string ToString(const TestKeyClass &x) {
 template<class Table1, class Table2, class GetKey = SimpleGetKey<typename Table1::value_type>,
         class ValueEqual = std::equal_to<typename Table1::value_type>>
 bool IsTableSame(const Table1 &table1, const Table2 &table2) {
+    // Every correctness path in this file compares a table against the
+    // reference container through here, so this is where the suite counts what
+    // it actually checked. main() requires a floor.
+    ++LogHelper::check_count();
     if (table1.size() != table2.size()) {
         return false;
     }
