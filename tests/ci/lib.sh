@@ -155,11 +155,21 @@ fph_report_only() {
 # The probe sources always come from this revision, so this is what a pull
 # request that adds public API and exercises it in a probe looks like. Nothing
 # can be compared, and without a way through, such a pull request cannot land.
+#
+# Unlike the other ways a measurement fails, this one is expected on the push
+# that merges such a pull request: the base is then the master before the merge,
+# which by definition does not have the new API. Reproduced -- without the
+# report-only branch below, merging it turns master red with exit 2.
 fph_base_side_unbuildable() {
     gate=$1; label=$2; base=$3
     if reason=$(fph_gate_waived "$label"); then
         fph_announce warning "$gate did not run" \
             "the probe does not build against $base, so nothing was compared. Signed off by $reason."
+        exit 0
+    fi
+    if fph_report_only; then
+        fph_announce warning "$gate did not run" \
+            "the probe does not build against $base, so nothing was compared. This run was triggered by a push, and the base predates the change."
         exit 0
     fi
     fph_error "the probe built from this revision does not compile against $base"
