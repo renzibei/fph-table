@@ -76,17 +76,30 @@ fph_toolchain_tag() {
 # while each printing its own name in the banner. A matrix that dedupes by
 # either reports cells it never ran.
 #
-# The inode of the binary after following symlinks is the same for every name
-# that reaches the same file, and different for genuinely different compilers.
+# The file the name resolves to is not the identity either. Under a ccache or
+# distcc masquerade directory every compiler name is a link to one wrapper that
+# dispatches on argv[0], so two genuinely different compilers share one path and
+# one inode. Measured: a masquerade directory whose g++ is gcc 15 and whose
+# clang++ is Apple clang 21 made compile-matrix.sh drop clang++ and report "all
+# 3 matrix cells passed" for a 6-cell run.
+#
+# What is compared instead is the compiler's own answer: its target triple and
+# its predefined macros, which carry the family, the version and the standard
+# library. Two names for one compiler produce the same answer; gcc 13 and gcc 14
+# do not, and neither do the two ends of a masquerade.
 fph_compiler_identity() {
     cxx=$1
-    resolved=$(command -v "$cxx" 2>/dev/null) || { printf '%s\n' "$cxx"; return 0; }
-    inode=$(ls -iL "$resolved" 2>/dev/null | awk '{ print $1; exit }')
-    if [ -n "$inode" ]; then
-        printf 'inode:%s\n' "$inode"
-    else
-        printf 'path:%s\n' "$resolved"
+    macros=$(printf '' | "$cxx" -x c++ -E -dM - 2>/dev/null) || macros=""
+    if [ -n "$macros" ]; then
+        triple=$("$cxx" -dumpmachine 2>/dev/null) || triple=""
+        sum=$(printf '%s\n' "$macros" | LC_ALL=C sort | cksum | awk '{ print $1 "-" $2 }')
+        printf 'macros:%s:%s\n' "$triple" "$sum"
+        return 0
     fi
+    # A compiler that will not report its macros still has to be told apart from
+    # the others, so fall back to the file it resolves to.
+    resolved=$(command -v "$cxx" 2>/dev/null) || resolved=$cxx
+    printf 'path:%s\n' "$resolved"
 }
 
 # fph_mktempdir -- portable mktemp -d, removed by the caller's trap.

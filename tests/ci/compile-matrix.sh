@@ -94,7 +94,7 @@ for cxx in $CXX_LIST; do
         fph_warn "skipping $cxx: not on PATH"
         continue
     fi
-    # Two names for one binary are one compiler. Reporting them as two cells
+    # Two names for one compiler are one compiler. Reporting them as two cells
     # would report twice as much coverage as the run actually has.
     identity=$(fph_compiler_identity "$cxx")
     if grep -qxF "$identity" "$WORKDIR/seen"; then
