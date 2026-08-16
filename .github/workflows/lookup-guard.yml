@@ -38,8 +38,8 @@ env:
   # against itself and pass.
   FPH_CI_BASE_REF: >-
     ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha
-     || github.event_name == 'push' && github.event.before
-     || inputs.base }}
+    || github.event_name == 'push' && github.event.before
+    || inputs.base }}
   # The JSON array, so a label is matched whole rather than as a substring of a
   # longer one.
   FPH_CI_PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
