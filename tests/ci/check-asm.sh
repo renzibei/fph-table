@@ -1,33 +1,34 @@
 #!/bin/sh
-# check-asm.sh -- the lookup path must not get longer.
-#
-#   tests/ci/check-asm.sh                       # against the merge base
-#   tests/ci/check-asm.sh --base master --cxx g++
-#   tests/ci/check-asm.sh --allow-change        # sign off a deliberate change
-#
-# This project's first priority is lookup performance, and a CI runner cannot
-# measure that: the noise floor on a shared machine swamps the effect sizes
-# that matter. The machine code of the lookup symbols can be compared exactly,
-# though, and it is what actually determines the cost.
-#
-# Method: disassemble tests/ci/asm_probe.cpp built against the head include tree
-# and against the base include tree, IN THE SAME JOB WITH THE SAME COMPILER, and
-# compare the two symbol by symbol. Because both sides move together, upgrading
-# the compiler cannot fail a pull request that changed nothing -- which is why
-# there is no checked-in disassembly baseline.
-#
-# Verdicts:
-#   identical            -> pass, quietly
-#   every change shorter -> pass, and say by how much
-#   anything else        -> fail, print the instruction-level diff
-#
-# Overriding: --allow-change, or the `allow-lookup-asm-change` pull request
-# label, or [allow-asm-change] in a commit message.
+# check-asm.sh -- the machine code of the lookup path must not change.
+# See docs/ci.md for what this gates and why.
 set -eu
 
 SELF_DIR=$(cd "$(dirname "$0")" && pwd)
 . "$SELF_DIR/lib.sh"
 . "$SELF_DIR/revision.sh"
+
+GATE="lookup asm"
+LABEL=allow-lookup-asm-change
+
+usage() {
+    cat <<'EOF'
+check-asm.sh -- the machine code of the lookup path must not change.
+
+  tests/ci/check-asm.sh                       # against the merge base
+  tests/ci/check-asm.sh --base master --cxx g++
+  tests/ci/check-asm.sh --base-include DIR    # compare against a tree on disk
+  tests/ci/check-asm.sh --allow-change        # sign off a deliberate change
+
+Disassembles tests/ci/asm_probe.cpp against the head and base include trees, in
+this job with this compiler, and compares them symbol by symbol.
+
+  identical      -> pass
+  anything else  -> fail, and print the instruction-level diff
+
+Signing off a deliberate change needs the allow-lookup-asm-change pull request
+label, or --allow-change locally.
+EOF
+}
 
 BASE_REF=""
 BASE_INCLUDE=""
@@ -40,7 +41,7 @@ while [ $# -gt 0 ]; do
         --base-include) BASE_INCLUDE=$2; shift 2 ;;
         --cxx) CXX_LIST="$CXX_LIST $2"; shift 2 ;;
         --allow-change) ALLOW=1; shift ;;
-        -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
+        -h|--help) usage; exit 0 ;;
         *) fph_error "unknown argument: $1"; exit 2 ;;
     esac
 done
@@ -52,17 +53,25 @@ export FPH_CI_ALLOW_CHANGE=${FPH_CI_ALLOW_CHANGE:-0}
 HEAD_INCLUDE=${FPH_CI_INCLUDE:-$FPH_ROOT/include}
 
 WORK=$(fph_mktempdir)
-trap 'rm -rf "$WORK"' EXIT INT TERM
+trap 'rm -rf "$WORK"' EXIT
+trap 'rm -rf "$WORK"; exit 130' INT
+trap 'rm -rf "$WORK"; exit 143' TERM
 
 if [ -z "$BASE_INCLUDE" ]; then
-    if ! BASE_REF=$(fph_resolve_base_ref "$BASE_REF"); then
-        fph_error "cannot work out what to compare against; pass --base or --base-include"
-        exit 2
-    fi
-    fph_materialise_base "$BASE_REF" "$WORK/base"
+    set +e
+    BASE_REF=$(fph_resolve_base_ref "$BASE_REF"); resolved=$?
+    set -e
+    case "$resolved" in
+        0) ;;
+        3) fph_no_base "$GATE"; exit 0 ;;
+        *) fph_error "cannot work out what to compare against; pass --base or --base-include"
+           exit 2 ;;
+    esac
+    fph_materialise_base "$BASE_REF" "$WORK/base" || exit 2
     BASE_INCLUDE="$WORK/base/include"
     BASE_LABEL="$BASE_REF"
 else
+    [ -d "$BASE_INCLUDE" ] || { fph_error "no such include tree: $BASE_INCLUDE"; exit 2; }
     BASE_LABEL="$BASE_INCLUDE"
 fi
 
@@ -80,32 +89,26 @@ fi
 #   fphprobe_mms_find too. No instruction other than the nop family has "nop"
 #   in its mnemonic, so this cannot hide real work.
 SPLIT='
-/^[0-9a-fA-F]+ <.*>:$/ {
+/^(TARGET|[0-9a-fA-F]+) <.*>:$/ {
     sym = $0
-    sub(/^[0-9a-fA-F]+ </, "", sym)
+    sub(/^(TARGET|[0-9a-fA-F]+) </, "", sym)
     sub(/>:$/, "", sym)
     next
 }
 /nop/ { next }
-sym != "" {
-    line = $0
-    # asmdump.sh rewrites 0x... to HEX before it gets to its <sym+0x..> rule,
-    # so on GNU objdump the rule never fires and a residual absolute address
-    # survives in comments like "lea HEX(%rip),%rsi  # 212 <fphprobe_x+HEX>".
-    # That address moves whenever anything before it changes size. Finish the
-    # normalisation here rather than editing asmdump.sh, which is shared with
-    # the out-of-tree harness and must keep producing comparable output.
-    gsub(/<[^>]*\+HEX>/, "<SYM>", line)
-    gsub(/[0-9a-f]+ <SYM>/, "TARGET <SYM>", line)
-    print sym "\t" line
-}
+sym != "" { print sym "\t" $0 }
 '
 
 overall=0
+measured=0
 
 for cxx in $CXX_LIST; do
     if ! command -v "$cxx" >/dev/null 2>&1; then
-        fph_warn "skipping $cxx: not on PATH"
+        # A compiler the workflow asked for and the runner does not have means
+        # the cell did not run. Reporting that as a pass would be reporting a
+        # measurement that was never taken.
+        fph_error "$cxx is not on PATH, so nothing was disassembled"
+        overall=2
         continue
     fi
 
@@ -124,23 +127,17 @@ for cxx in $CXX_LIST; do
         exit 2
     fi
 
-    cut -f1 "$WORK/base.sym" | sort -u > "$WORK/base.names"
-    cut -f1 "$WORK/head.sym" | sort -u > "$WORK/head.names"
+    measured=$((measured + 1))
 
-    verdict=identical
-    if ! cmp -s "$WORK/base.sym" "$WORK/head.sym"; then
-        verdict=changed
-    fi
-
-    if [ "$verdict" = identical ]; then
+    if cmp -s "$WORK/base.sym" "$WORK/head.sym"; then
         fph_info "  result: identical ($(wc -l < "$WORK/head.sym" | tr -d ' ') instructions)"
         fph_info ""
         continue
     fi
 
-    structural=0
+    cut -f1 "$WORK/base.sym" | sort -u > "$WORK/base.names"
+    cut -f1 "$WORK/head.sym" | sort -u > "$WORK/head.names"
     if ! cmp -s "$WORK/base.names" "$WORK/head.names"; then
-        structural=1
         fph_info "  symbols only in base:"
         comm -23 "$WORK/base.names" "$WORK/head.names" | sed 's/^/    /'
         fph_info "  symbols only in head:"
@@ -160,13 +157,6 @@ for cxx in $CXX_LIST; do
         bn=$(wc -l < "$WORK/b.one" | tr -d ' ')
         hn=$(wc -l < "$WORK/h.one" | tr -d ' ')
         printf '  %-34s %8s %8s %+8d\n' "$sym" "$bn" "$hn" "$((hn - bn))"
-        case "$sym" in
-            fphprobe_sizeof_*)
-                # A sizeof probe is a one-instruction "return N". If its body
-                # moved, the table object changed size. check-sizeof.sh reports
-                # the number; here it is simply disqualifying.
-                structural=1 ;;
-        esac
         if [ "$hn" -gt "$bn" ]; then
             longer=$((longer + 1))
         elif [ "$hn" -lt "$bn" ]; then
@@ -177,32 +167,29 @@ for cxx in $CXX_LIST; do
     done < "$WORK/head.names"
 
     fph_info ""
-    if [ "$structural" -eq 0 ] && [ "$longer" -eq 0 ] && [ "$reordered" -eq 0 ] \
-            && [ "$shorter" -gt 0 ]; then
-        fph_info "  result: the lookup path got SHORTER in $shorter symbol(s); nothing got longer"
-        fph_info "  (pass -- this is an improvement, no sign-off needed)"
-        fph_info ""
-        continue
-    fi
-
     fph_info "  instruction-level diff (base -> head):"
     diff -u "$WORK/base.sym" "$WORK/head.sym" | sed 's/^/    /' | head -200 || true
     fph_info ""
 
-    if reason=$(fph_change_allowed '[allow-asm-change]' allow-lookup-asm-change); then
-        fph_warn "the lookup path changed and the change is signed off (via $reason)"
-        fph_warn "the diff above is what was accepted"
+    if reason=$(fph_gate_waived "$LABEL"); then
+        fph_announce warning "$GATE waived" \
+            "the lookup path's machine code changed under $cxx and was signed off by $reason. The diff is in the log."
         fph_info ""
         continue
     fi
 
-    fph_error "the lookup path changed under $cxx: $longer symbol(s) longer, $reordered same length but different, $shorter shorter, structural=$structural"
-    fph_error "this project's first priority is lookup performance, so this is a failure by default."
-    fph_error "if the change is intended and justified, sign it off with one of:"
-    fph_error "  * the pull request label  allow-lookup-asm-change"
-    fph_error "  * [allow-asm-change] in a commit message"
+    fph_error "the lookup path changed under $cxx: $longer symbol(s) longer, $reordered same length but different, $shorter shorter"
+    fph_error "a shorter lookup path is not automatically an improvement: a static instruction"
+    fph_error "count is not a speed proxy, so it needs the same sign-off as a longer one."
+    fph_error "if the change is intended, sign it off with:"
+    fph_error "  * the pull request label  $LABEL"
     fph_error "  * tests/ci/check-asm.sh --allow-change   (locally)"
     overall=1
 done
+
+if [ "$measured" -eq 0 ]; then
+    fph_error "no compiler was usable, so nothing was disassembled and nothing was checked"
+    exit 2
+fi
 
 exit "$overall"
