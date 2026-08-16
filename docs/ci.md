@@ -43,17 +43,24 @@ The callgrind job is Linux only: valgrind has no macOS arm64 port.
 
 | event | `ci` | `lookup-guard` |
 | --- | --- | --- |
-| pull request opened, updated, reopened | yes | yes |
-| pull request labelled or unlabelled | no | yes |
-| push to `master` | yes | yes, reporting only |
-| manual run (`workflow_dispatch`) | yes | yes |
+| pull request opened, updated, reopened | yes | yes, gating |
+| pull request labelled or unlabelled | no | yes, gating |
+| push to `master` | yes | yes; `asm`, `counters` and `callgrind` report, `sizeof` gates |
+| manual run (`workflow_dispatch`) on `master` | yes | as a push to `master` |
+| manual run on a branch | yes | yes, gating |
 | nightly, 03:17 UTC | yes | no |
 
 `lookup-guard` runs on label changes because that is how a gate is signed off.
 Adding the label starts a new run that sees it; re-running the failed one
 replays the payload it already had.
 
-The base revision the comparison gates use differs per event:
+A manual run on `master` counts as a push. The commit has already landed, so
+there is nothing left to hold back, and the run carries no pull request and so
+no label; gating it would leave it red on a difference that was signed off
+before it merged, with no way to say so.
+
+The base revision the comparison gates use differs per event. `sizeof` is not in
+this table: it compares against a file in the tree, not against a revision.
 
 | event | base |
 | --- | --- |
@@ -72,40 +79,67 @@ local `master`, so a default of `master` resolves to nothing on a branch and to
 `HEAD` on `master`; leaving it empty lets the script take the merge base, and on
 `master` itself the previous commit.
 
+For the same reason, do not type the name of the branch the run is on into the
+`base` box. `actions/checkout` puts that branch at `HEAD`, so `master` on a run
+on `master` names the revision being tested; the gates fail with a message
+saying so rather than announcing that there was nothing to compare against. A
+sha, `HEAD~1`, or an empty box all work.
+
 ## What a green check means
 
 A check reports success only when it took its measurement and the measurement
 passed. A crashed probe, a compiler that is not installed, a disassembly that
-came out empty, a counter that only one side reported, zero matching tests: each
-of those fails the job.
+came out empty, a base tree that arrived incomplete, a counter or a scenario
+that only one side reported, zero matching tests: each of those fails the job,
+on every event, and no label changes that. `ctest` is passed `--no-tests=error`
+for the last of them, because on its own it exits 0 when nothing matches.
+
+Every gate that has a base side measures this revision first and the base
+second, so a failure to build or run is charged to the side that caused it.
+Reaching the base side first turns a broken probe or a missing compiler into
+"the base predates this change", which is green on a push.
 
 Three things finish green without a measurement, and each says so in a warning
 annotation and a line in the job summary:
 
-- A push whose predecessor does not exist — the first push of a branch.
-- A pull request whose probe cannot be built against the base revision, once it
-  carries that gate's label. See "Adding public API" below.
+- A push whose predecessor does not exist — the first push of a branch. The
+  head side is still built first, so this is green only when the gate is
+  otherwise working.
+- A pull request whose probe builds against this revision but not against the
+  base revision, once it carries that gate's label. See "Adding public API".
 - A push whose predecessor cannot build the probe, which is what merging such a
   pull request looks like: the base is then the `master` before the merge, and
   by definition it does not have the new API.
 
-Push-triggered runs of `lookup-guard` report rather than gate. The commit has
-already landed and a push event carries no pull request and so no labels, so a
-difference is a warning annotation and the job stays green; otherwise every
-merge of a signed-off pull request would turn `master` red. Everything else
-that stops a measurement — a probe that will not build against this revision, a
-compiler that is not installed, an empty disassembly — still fails the job on a
-push.
+Runs of `lookup-guard` on a commit that has already landed — a push to `master`,
+or a manual run on `master` — report rather than gate. Such a run carries no
+pull request and so no labels, so a measured difference is a warning annotation
+and the job stays green; otherwise every merge of a signed-off pull request
+would turn `master` red. This covers a measured difference and nothing else.
+Everything in the first paragraph above still fails there.
+
+`sizeof` is the exception: it gates on every event, including a push. It
+compares against `tests/ci/baselines/sizeof.txt`, which travels in the same
+commit as the change that moves it, so the push that merges a recorded change
+compares the new sizes against the new file and passes. There is no state in
+which reporting rather than gating would save it, and nothing for a label to
+rescue.
 
 ## Method
 
 Nothing is timed. A shared runner cannot resolve the differences this library
 cares about, so every gate produces exact integers instead.
 
-Nothing is compared against a number recorded elsewhere either, except `sizeof`.
-Each gate builds the base revision in the same job with the same compiler and
-compares against that, so a runner image or compiler upgrade moves both sides at
-once and cannot fail a pull request that changed nothing.
+Three of the four gates compare against no recorded number. `asm`, `counters`
+and `callgrind` build the base revision in the same job with the same compiler
+and compare against that, so a runner image or compiler upgrade moves both sides
+at once and cannot fail a pull request that changed nothing. They have no
+choice: their numbers depend on the standard library and the compiler version,
+so there is nothing to write down.
+
+`sizeof` does compare against a recorded file. Struct sizes hold across LP64
+targets and across compilers, so they can be written down, and a file states
+what the sizes are rather than only that they did not move since yesterday.
 
 ## Signing off a deliberate change
 
@@ -133,8 +167,11 @@ survives a merge.
 
 The probe sources always come from the revision under test, so a pull request
 that adds public API and exercises it in a probe leaves the base revision unable
-to compile that probe. No comparison is possible. The gate says which side
-failed to build and stops with exit 2. Two ways forward:
+to compile that probe. No comparison is possible. The gate reaches this only
+after the same probe has built and run against this revision, so what it names
+is a difference between the two trees and not a broken probe or a broken
+runner. It says which side failed to build and stops with exit 2. Two ways
+forward:
 
 - Land the API first, and add the probe's use of it in a later pull request.
   The gate then measures both.
@@ -142,8 +179,8 @@ failed to build and stops with exit 2. Two ways forward:
   green, and the label records that the run measured nothing.
 
 The push that merges such a pull request hits the same wall, because its base
-is the `master` before the merge. There it is a warning and the job stays
-green, for the same reason every other push-triggered difference is.
+is the `master` before the merge. There it is a warning and the job stays green,
+for the same reason every other difference on an already-landed commit is.
 
 ## Lookup asm
 
@@ -164,13 +201,27 @@ erasing them hides changes like `and $0x1,%eax` becoming `and $0x3,%eax`.
 ## sizeof
 
 Compared against `tests/ci/baselines/sizeof.txt` for exact equality, in both
-directions. The recorded sizes hold on every LP64 target tried, so there is one
-file rather than one per platform; a target where they cannot hold fails and
-needs its own baseline.
+directions. The recorded sizes hold on every LP64 target tried — 41 of 41
+records agree between Linux x86-64 and macOS arm64 today — so there is one file
+rather than one per platform.
 
 ```sh
 tests/ci/update-baselines.sh --sizeof
 ```
+
+This gate has no label and no `--allow-change`, and it gates on a push as well
+as on a pull request. Both follow from comparing against a file in the tree
+rather than against another revision. Rewriting the file needs the same write
+access a label needs and is visible in the diff, and because the file travels in
+the commit that changes the sizes, the push that merges it compares the new
+sizes against the new file and passes.
+
+If a platform ever disagrees while the others still hold, the answer is a
+baseline of its own rather than a way to wave the difference through:
+`check-sizeof.sh --baseline FILE --update` records one, and the same
+`--baseline` goes on that platform's cell in `lookup-guard.yml`. Until that
+happens there is one file, and `fph_platform_tag` in `lib.sh` names a platform
+for the `--print` headers rather than choosing a baseline.
 
 ## Counters
 
@@ -192,16 +243,35 @@ keys over more cache lines while the disassembly stays byte-identical.
 
 Both probe runs must reach their last workload. One probe source builds both
 sides, so a counter that appears on one side only means a run stopped early, and
-the check fails rather than treating it as new.
+the check fails with exit 2 rather than treating it as new. That is a failure to
+measure and not a difference, so no label and no already-landed commit turns it
+green. The callgrind gate treats a scenario reported by one side the same way.
 
 The probe serves every allocation from a fixed 512 MiB arena, which is what
 makes the counts reproducible; it is `.bss`, so untouched pages cost nothing.
 A change that makes the parameter search restart far more often can use it up,
-and the probe then stops with `arena exhausted`. Measured high-water marks at
-20000 keys: 13 MB unmodified, 51 MB with the default load factor at 0.9, 239 MB
-at 0.97. If a change needs more, raise `kArenaBytes` in
-`tests/ci/counter_probe.cpp` in the same commit. It cannot grow much further:
-2 GiB of `.bss` does not link under the default code model.
+and the probe then stops with `arena exhausted`. If a change needs more, raise
+`kArenaBytes` in `tests/ci/counter_probe.cpp` in the same commit. It cannot grow
+much further: 2 GiB of `.bss` does not link under the default code model.
+
+How much one run consumes was measured by raising `DEFAULT_MAX_LOAD_FACTOR` in
+the headers, printing the arena's bump pointer after the last workload, and
+building the probe the way the gate builds it (`-std=c++17 -O2 -DNDEBUG`):
+
+| default `max_load_factor` | Linux, libstdc++ | macOS, libc++ |
+| --- | --- | --- |
+| 0.6, unmodified | 12.7 MiB | 12.7 MiB |
+| 0.9, `dynamic_fph_table.h` only | 34.8 MiB | 30.6 MiB |
+| 0.9, both headers | 56.9 MiB | 48.4 MiB |
+| 0.97, `dynamic_fph_table.h` only | 143.5 MiB | 120.2 MiB |
+| 0.97, both headers | 274.2 MiB | 227.7 MiB |
+
+The Linux column is identical to the byte under gcc 13 and clang 18; libc++
+runs lower on the same edits, because the parameter search draws from
+`std::uniform_int_distribution` and the two libraries answer it differently.
+That difference is why the arena is 512 MiB and not the 128 MiB it replaced: at
+0.97 in `dynamic_fph_table.h` alone, 128 MiB is exhausted on Linux and not on
+macOS, so the same change would have failed the Linux cells only.
 
 ## Callgrind
 
@@ -241,7 +311,7 @@ reported 14 mispredicts per million probes here.
 ```sh
 cmake -S tests -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
-ctest --test-dir build --output-on-failure
+ctest --test-dir build --output-on-failure --no-tests=error
 ```
 
 | test | labels |
@@ -251,9 +321,16 @@ ctest --test-dir build --output-on-failure
 | `sample_fph` | `correctness` |
 | `fph_table_correctness` | `correctness`, `slow` |
 
-`ctest -L correctness`, `-LE slow` and `-R <name>` work as usual. Note that
-`ctest` exits 0 when a selector matches nothing, so a label or a name that does
-not exist reports success; check `ctest -N` if a run finishes suspiciously fast.
+`ctest -L correctness`, `-LE slow` and `-R <name>` work as usual.
+
+`--no-tests=error` is there because without it `ctest` exits 0 when it has
+nothing to run. Measured on cmake 3.28.3, which is what the `ubuntu-24.04` image
+carries, and on 4.2.1: a build with no registered test prints `No tests were
+found!!!` and exits 0, and `-R` and `-L` with a selector that matches nothing do
+the same. Deleting every `add_test` from `tests/CMakeLists.txt` left the job
+green. With the flag each of those exits 8. A cmake old enough not to know the
+flag rejects it outright; there, `ctest -N` lists what a run would have done.
+
 The benchmark is not registered unless you configure with
 `-DFPH_ENABLE_BENCHMARK_TEST=ON`.
 
