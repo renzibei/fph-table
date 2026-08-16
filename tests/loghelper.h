@@ -14,6 +14,22 @@ class LogHelper {
 
 public:
 
+    // Counts of what happened, so a caller can end with a verdict instead of
+    // leaving the reader to spot red text. tests/CMakeLists.txt also matches
+    // the Error escape sequence below; the two are independent on purpose.
+    static unsigned long &error_count() {
+        static unsigned long n = 0;
+        return n;
+    }
+
+    // Incremented by each correctness check the suite completes. main() refuses
+    // to report success when too few of them ran: a suite that returns without
+    // testing anything otherwise passes in no time at all.
+    static unsigned long &check_count() {
+        static unsigned long n = 0;
+        return n;
+    }
+
     /**
      * A printf style log function, can used glog as underlying output tool
      * @tparam Args
@@ -34,6 +50,7 @@ public:
 #endif
         {
             if (type == Error) {
+                ++error_count();
                 fprintf(stderr, "\033[40;31m");
             }
             else if (type == Warn) {

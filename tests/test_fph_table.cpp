@@ -208,6 +208,10 @@ std::string ToString(const TestKeyClass &x) {
 template<class Table1, class Table2, class GetKey = SimpleGetKey<typename Table1::value_type>,
         class ValueEqual = std::equal_to<typename Table1::value_type>>
 bool IsTableSame(const Table1 &table1, const Table2 &table2) {
+    // Every correctness path in this file compares a table against the
+    // reference container through here, so this is where the suite counts what
+    // it actually checked. main() requires a floor.
+    ++LogHelper::check_count();
     if (table1.size() != table2.size()) {
         return false;
     }

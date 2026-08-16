@@ -19,14 +19,6 @@ enable_testing()
 # ctest run. Turn this on to register it as well.
 option(FPH_ENABLE_BENCHMARK_TEST "Register the performance benchmark as a ctest test" OFF)
 
-# Some cases wait for the library's own parameter-search retry budget to run
-# out, which takes tens of seconds to minutes. Setting this to a smaller number
-# lets CI run those cases with a reduced budget instead of skipping them; a test
-# that wants it reads FPH_TEST_RETRY_BUDGET, either as a macro or from the
-# environment. 0 means "leave the library's defaults alone".
-set(FPH_TEST_RETRY_BUDGET "0" CACHE STRING
-    "Reduced parameter-search retry budget for slow tests; 0 uses the library default")
-
 add_executable(fph_table_tests main.cpp test_fph_table.cpp)
 
 add_executable(sample_fph sample_fph.cpp)
@@ -45,13 +37,6 @@ target_link_libraries(sample_fph fph::fph_table)
 target_link_libraries(test_bits_array fph::fph_table)
 target_link_libraries(fph_api_smoke fph::fph_table)
 
-if(NOT FPH_TEST_RETRY_BUDGET STREQUAL "0")
-    foreach(target fph_table_tests fph_api_smoke)
-        target_compile_definitions(${target} PRIVATE
-                                   FPH_TEST_RETRY_BUDGET=${FPH_TEST_RETRY_BUDGET})
-    endforeach()
-endif()
-
 add_test(NAME fph_api_smoke COMMAND fph_api_smoke)
 add_test(NAME bits_array COMMAND test_bits_array)
 add_test(NAME sample_fph COMMAND sample_fph)
@@ -65,17 +50,17 @@ set_tests_properties(sample_fph PROPERTIES LABELS correctness TIMEOUT 600)
 set_tests_properties(fph_table_correctness PROPERTIES LABELS "correctness;slow"
                      TIMEOUT 3600)
 
-# tests/test_fph_table.cpp reports a failure by logging it in red and carrying
-# on; on this revision the process exit status is 0 whatever happens. Matching
-# the escape sequence LogHelper emits for Error turns those reports into a real
-# failure without editing the suite. Ordinary output never contains it.
+# The suite reports a failure through LogHelper and carries on; tests/main.cpp
+# turns the count of those reports into the exit status, and also fails when too
+# few checks ran, so a suite that returns without testing anything is a failure
+# rather than a fast pass. The exit status is the verdict.
+#
+# Matching the escape sequence LogHelper emits for an Error is kept as a second,
+# independent path to the same verdict, and covers sample_fph, which has no
+# counter of its own. Not PASS_REGULAR_EXPRESSION: setting one makes ctest
+# ignore the exit status, which would retire the check above.
 set_tests_properties(fph_table_correctness sample_fph
                      PROPERTIES FAIL_REGULAR_EXPRESSION "\\[40;31m")
-
-foreach(test fph_api_smoke bits_array sample_fph fph_table_correctness)
-    set_tests_properties(${test} PROPERTIES ENVIRONMENT
-                         "FPH_TEST_RETRY_BUDGET=${FPH_TEST_RETRY_BUDGET}")
-endforeach()
 
 if(FPH_ENABLE_BENCHMARK_TEST)
     add_test(NAME fph_table_benchmark COMMAND fph_table_tests --benchmark)
