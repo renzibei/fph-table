@@ -77,10 +77,21 @@ const std::size_t kHeaderSize = sizeof(BlockHeader);  // 32 on every LP64 target
 
 // The bump arena. Never reuses a freed block, so the address of the Nth
 // allocation depends only on N and on the sizes before it -- which is exactly
-// the property that makes the counts reproducible. 128 MiB of .bss; only the
-// pages actually touched are ever committed, and the workloads below use a few
-// megabytes in total.
-const std::size_t kArenaBytes = 128u * 1024u * 1024u;
+// the property that makes the counts reproducible.
+//
+// .bss, so only the pages actually touched are ever committed and the size
+// costs nothing until it is used. Measured high-water mark on an unmodified
+// checkout: 13.3 MB, 51 MB with the default load factor raised to 0.9, 239 MB
+// at 0.97. The size below is 512 MiB because a change that makes the parameter
+// search restart far more often reaches the old 128 MiB, and exhaustion is a
+// failure to measure that no label can sign off.
+//
+// It cannot grow much further. The default code model addresses statics with a
+// signed 32-bit displacement, so 2 GiB of .bss does not link on x86-64
+// ("relocation truncated to fit: R_X86_64_PC32 against `.bss'"); on macOS
+// arm64 it links but dyld then cannot map the shared cache and the binary will
+// not start, and 4 GiB fails to link there too ("ADRP out of range").
+const std::size_t kArenaBytes = 512u * 1024u * 1024u;
 alignas(64) unsigned char g_arena[kArenaBytes];
 std::size_t g_arena_used = 0;
 
@@ -90,8 +101,9 @@ void *ArenaAllocate(std::size_t n) {
         // Falling back to malloc here would silently reintroduce the very
         // nondeterminism the arena exists to remove, so refuse instead.
         std::fprintf(stderr,
-                     "counter_probe: arena exhausted (%zu bytes); raise kArenaBytes\n",
-                     kArenaBytes);
+                     "counter_probe: arena exhausted after %zu of %zu bytes, asking for %zu more.\n"
+                     "counter_probe: raise kArenaBytes in tests/ci/counter_probe.cpp.\n",
+                     g_arena_used, kArenaBytes, rounded);
         std::exit(2);
     }
     void *p = g_arena + g_arena_used;
@@ -452,7 +464,7 @@ void CopyCountedMap() {
 // 20000 keys rather than more: the arena above never reuses a freed block, so
 // its consumption scales with how many times the parameter search restarts, and
 // a search made harder on purpose has to fit too. Measured, both maps together:
-// 13 MiB of the 128 MiB arena at this size and the default load factor, and 51
+// 13 MiB of the 512 MiB arena at this size and the default load factor, and 51
 // MiB with the load factor raised to 0.9, where the search restarts far more.
 // At 100000 the same 0.9 run needs more than 768 MiB.
 

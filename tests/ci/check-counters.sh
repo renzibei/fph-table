@@ -93,6 +93,12 @@ measure() { # <side> <include-dir> <out-file>
         fph_error "the counter probe built against $1 exited $probe_status"
         fph_error "it emitted $(wc -l < "$WORK/raw.txt" | tr -d ' ') of its counters; the rest were not measured"
         sed 's/^/  /' "$WORK/probe.err" | head -10
+        if grep -q 'arena exhausted' "$WORK/probe.err"; then
+            fph_error "the probe serves every allocation from a fixed arena, which is what makes"
+            fph_error "the counts reproducible. A change that makes the parameter search restart"
+            fph_error "far more often can use it up. Raise kArenaBytes in tests/ci/counter_probe.cpp"
+            fph_error "in the same commit, and say in the pull request what made the search harder."
+        fi
         exit 2
     fi
     cat "$WORK/probe.err" >&2
