@@ -152,6 +152,10 @@ LC_ALL=C join -a1 -a2 -e MISSING -o 0,1.2,2.2 "$WORK/ref.txt" "$WORK/head.txt" \
 # One probe source builds both sides, so the two must report the same counters.
 # A counter on one side only means one of the runs is incomplete, not that the
 # workload is new, and an ungated counter is one nothing is watching.
+#
+# That makes it a failure to measure rather than a difference: it leaves through
+# exit 3 and not through the exit 1 that a label or an already-landed commit
+# turns green. Nothing signed off makes a half-reported run into a comparison.
 awk '
 {
     name = $1; ref = $2; head = $3
@@ -173,7 +177,8 @@ END {
     printf "%d unchanged, %d improved, %d regressed, %d reported by one side only\n",
            same, nb + 0, nw + 0, na + nr + 0
     if (same + nb + nw == 0) { print "no counter was compared at all"; exit 2 }
-    exit (nw + nr + na) > 0 ? 1 : 0
+    if (na + nr > 0) { exit 3 }
+    exit nw > 0 ? 1 : 0
 }
 ' "$WORK/joined.txt" > "$WORK/report.txt" && status=0 || status=$?
 
@@ -186,6 +191,13 @@ if [ "$status" -eq 0 ]; then
 fi
 if [ "$status" -eq 2 ]; then
     fph_error "the two sides have no counter in common; nothing was compared"
+    exit 2
+fi
+if [ "$status" -eq 3 ]; then
+    fph_error "a counter was reported by one side and not the other"
+    fph_error "one probe source builds both sides, so this is a run that stopped early rather"
+    fph_error "than a workload that is new. Those counters were not compared, and no label or"
+    fph_error "already-landed commit makes that into a comparison."
     exit 2
 fi
 

@@ -254,7 +254,11 @@ END {
     printf "\n%d scenario(s) changed instruction count, %d exceeded the D1 miss bound (+%.0f%%)\n",
            ir_changed + 0, d1_worse + 0, (d1_headroom - 1) * 100
     if (compared + 0 == 0) { print "no scenario was compared at all"; exit 2 }
-    exit (ir_changed + d1_worse + removed + added) > 0 ? 1 : 0
+    # A scenario on one side only is a run that stopped early, so it leaves
+    # through 3 rather than the 1 that a label or an already-landed commit turns
+    # green: nothing was compared there for either to sign off.
+    if (added + removed > 0) { exit 3 }
+    exit (ir_changed + d1_worse) > 0 ? 1 : 0
 }
 ' "$WORK/joined.txt" > "$WORK/report.txt" && status=0 || status=$?
 
@@ -267,6 +271,13 @@ if [ "$status" -eq 0 ]; then
 fi
 if [ "$status" -eq 2 ]; then
     fph_error "the two sides have no scenario in common; nothing was compared"
+    exit 2
+fi
+if [ "$status" -eq 3 ]; then
+    fph_error "a scenario was counted on one side and not the other"
+    fph_error "one probe source builds both sides, so this is a run that stopped early rather"
+    fph_error "than a scenario that is new. Those scenarios were not compared, and no label or"
+    fph_error "already-landed commit makes that into a comparison."
     exit 2
 fi
 
