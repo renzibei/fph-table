@@ -138,10 +138,16 @@ fph_announce() {
 
 # fph_report_only -- is this run reporting rather than gating?
 #
-# Set by the workflow on a push. A push event carries no pull request and so no
-# labels, and the commit has already landed. Without this, merging a pull
-# request whose gate was signed off turns master red on the very next run: the
-# push re-measures the same difference and finds no label to waive it.
+# Set by the workflow when the commit under test has already landed on the
+# default branch: every push to it, and a manual run on it. Such a run carries
+# no pull request and so no labels. Without this, merging a pull request whose
+# gate was signed off turns master red on the very next run: the push re-measures
+# the same difference and finds no label to waive it. The manual case is the same
+# state reached by hand, and was red until the workflow counted it too.
+#
+# It covers a measured difference and nothing else. A measurement that could not
+# be taken -- a probe that will not build against this revision, a compiler that
+# is not installed, an empty disassembly -- fails whatever the event.
 fph_report_only() {
     case "${FPH_CI_REPORT_ONLY:-}" in
         1|true|TRUE|yes) return 0 ;;
@@ -160,16 +166,28 @@ fph_report_only() {
 # that merges such a pull request: the base is then the master before the merge,
 # which by definition does not have the new API. Reproduced -- without the
 # report-only branch below, merging it turns master red with exit 2.
+#
+# Two things have to be true before a caller may reach this, and both are
+# properties of the caller rather than of anything checked here:
+#
+#   the head side has already been built and measured, so the compiler and the
+#   probe are known to work and the failure can only be the base tree. A gate
+#   that builds the base side first turns a broken probe and a broken compiler
+#   into this, and this into exit 0;
+#
+#   the base tree came out of fph_materialise_base, which counts the files it
+#   extracted against the ref's own tree, so a truncated extraction is not
+#   passed off as a base that predates the change.
 fph_base_side_unbuildable() {
     gate=$1; label=$2; base=$3
     if reason=$(fph_gate_waived "$label"); then
         fph_announce warning "$gate did not run" \
-            "the probe does not build against $base, so nothing was compared. Signed off by $reason."
+            "the probe builds and runs against this revision but not against $base, so nothing was compared. Signed off by $reason."
         exit 0
     fi
     if fph_report_only; then
         fph_announce warning "$gate did not run" \
-            "the probe does not build against $base, so nothing was compared. This run was triggered by a push, and the base predates the change."
+            "the probe builds and runs against this revision but not against $base, so nothing was compared. This run reports an already-landed commit, and the base predates the change."
         exit 0
     fi
     fph_error "the probe built from this revision does not compile against $base"

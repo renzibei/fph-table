@@ -197,7 +197,7 @@ fi
 
 if fph_report_only; then
     fph_announce warning "$GATE: reported, not gated" \
-        "construction got more expensive under $CXX. This run was triggered by a push, so the commit has already landed. The numbers are in the log."
+        "construction got more expensive under $CXX. This run reports a commit that has already landed, so it does not gate. The numbers are in the log."
     exit 0
 fi
 

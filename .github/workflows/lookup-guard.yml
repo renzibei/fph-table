@@ -51,12 +51,14 @@ env:
   # The JSON array, so a label is matched whole rather than as a substring of a
   # longer one.
   FPH_CI_PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
-  # A push carries no pull request and so no labels, and the commit has already
-  # landed. Re-measuring a difference a pull request signed off would turn
-  # master red on every merge, so on a push a measured difference is a warning
-  # annotation and the job stays green. A measurement that could not be taken
-  # still fails.
-  FPH_CI_REPORT_ONLY: ${{ github.event_name == 'push' }}
+  # Report rather than gate when the commit under test has already landed: every
+  # push to the default branch, and a manual run on it. Such a run carries no
+  # pull request and so no labels, so re-measuring a difference that a pull
+  # request signed off would turn master red on every merge, and would leave a
+  # manual re-run of master permanently red with no way to sign it off. There a
+  # measured difference is a warning annotation and the job stays green. A
+  # measurement that could not be taken still fails, on every event.
+  FPH_CI_REPORT_ONLY: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) }}
 
 jobs:
   # Does the lookup path's machine code change? Identical passes; anything else

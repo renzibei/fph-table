@@ -278,7 +278,7 @@ fi
 
 if fph_report_only; then
     fph_announce warning "$GATE: reported, not gated" \
-        "the lookup loop's cost changed under $CXX. This run was triggered by a push, so the commit has already landed. The counts are in the log."
+        "the lookup loop's cost changed under $CXX. This run reports a commit that has already landed, so it does not gate. The counts are in the log."
     exit 0
 fi
 
