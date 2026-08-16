@@ -29,18 +29,22 @@ EOF
 }
 
 DO_SIZEOF=0
+SELECTED=0
 CXX=${FPH_CI_CXX:-}
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --sizeof) DO_SIZEOF=1; shift ;;
+        --sizeof) DO_SIZEOF=1; SELECTED=1; shift ;;
         --cxx) CXX=$2; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) fph_error "unknown argument: $1"; exit 2 ;;
     esac
 done
 
-DO_SIZEOF=1
+# Naming none of them means all of them, which today is the one there is.
+if [ "$SELECTED" -eq 0 ]; then
+    DO_SIZEOF=1
+fi
 
 if [ -z "$CXX" ]; then
     CXX=$(fph_default_compilers | head -1)

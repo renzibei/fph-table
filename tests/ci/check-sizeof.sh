@@ -20,11 +20,18 @@ An exact comparison in both directions. Growing the table object costs every
 lookup a wider cache footprint; shrinking it means the layout was rearranged.
 Either way the fix is to update the baseline in the commit that changes it.
 
-This gate has no --allow-change: it compares against a checked-in file, so a
-deliberate change is recorded by rewriting that file rather than signed off.
+This gate has no --allow-change and no label, and unlike the other three it
+gates on a push as well. Both follow from what it compares against: a file in
+the tree. A deliberate change is recorded by rewriting that file in the same
+commit, which needs the same write access a label does and is visible in the
+diff, and because the file travels with the commit, the push that merges it
+compares the new sizes against the new file and passes. There is nothing left
+for a sign-off to rescue.
 
-The recorded sizes are LP64 sizes. On a target where they cannot hold, this
-fails rather than skipping; that target needs its own baseline first.
+The recorded sizes are LP64 sizes, and one file serves every platform because
+every LP64 target measured agrees. A target that genuinely disagrees needs its
+own baseline -- --baseline names one, and the workflow cell for that platform
+passes it -- rather than a way to wave the difference through.
 EOF
 }
 
@@ -121,8 +128,12 @@ fi
 
 sed 's/^/  /' "$WORK/diff.txt"
 fph_rule
-fph_error "container sizes differ from tests/ci/baselines/sizeof.txt"
+fph_error "container sizes differ from $BASELINE"
 fph_error "growing the table object slows every lookup; shrinking it means the layout moved."
 fph_error "if the change is intended, record it in the same commit:"
 fph_error "  tests/ci/update-baselines.sh --sizeof"
+fph_error "if instead this platform disagrees with the recorded LP64 sizes while the others"
+fph_error "still hold, it needs a baseline of its own: record one with --baseline and pass the"
+fph_error "same --baseline from that platform's cell in .github/workflows/lookup-guard.yml."
+fph_error "There is no label for this gate; the recorded file is the sign-off."
 exit 1
