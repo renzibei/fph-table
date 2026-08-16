@@ -57,19 +57,23 @@ trap 'rm -rf "$WORK"' EXIT
 trap 'rm -rf "$WORK"; exit 130' INT
 trap 'rm -rf "$WORK"; exit 143' TERM
 
+# Resolved now, acted on after the head side has been disassembled. "There was
+# nothing to compare against" is a pass without a measurement, and this script
+# does not hand one out before this revision's own side has been shown to build.
+HAVE_BASE=1
+BASE_LABEL=""
 if [ -z "$BASE_INCLUDE" ]; then
     set +e
     BASE_REF=$(fph_resolve_base_ref "$BASE_REF"); resolved=$?
     set -e
     case "$resolved" in
-        0) ;;
-        3) fph_no_base "$GATE"; exit 0 ;;
+        0) fph_materialise_base "$BASE_REF" "$WORK/base" || exit 2
+           BASE_INCLUDE="$WORK/base/include"
+           BASE_LABEL="$BASE_REF" ;;
+        3) HAVE_BASE=0 ;;
         *) fph_error "cannot work out what to compare against; pass --base or --base-include"
            exit 2 ;;
     esac
-    fph_materialise_base "$BASE_REF" "$WORK/base" || exit 2
-    BASE_INCLUDE="$WORK/base/include"
-    BASE_LABEL="$BASE_REF"
 else
     [ -d "$BASE_INCLUDE" ] || { fph_error "no such include tree: $BASE_INCLUDE"; exit 2; }
     BASE_LABEL="$BASE_INCLUDE"
@@ -104,6 +108,11 @@ sym != "" { print sym "\t" $0 }
 # field here compares mnemonics and ignores every operand: the failure summary
 # for `and x10, x8, #0x1` -> `#0x3` came out as an empty table and "0 longer, 0
 # same length but different, 0 shorter".
+#
+# That was a macOS-only defect. GNU objdump writes a space there, so on the Linux
+# cells one field was already the whole instruction and they reported the change
+# correctly; the gate failed on all three cells either way, and what was wrong on
+# macOS was the summary that says which symbols moved.
 INSTRUCTION='$1 == s { sub(/^[^\t]*\t/, ""); print }'
 
 # dump <side> <include-dir> <out> <label> -- disassemble one side, and say which
@@ -124,6 +133,7 @@ dump() {
 
 overall=0
 measured=0
+no_base=0
 
 for cxx in $CXX_LIST; do
     if ! command -v "$cxx" >/dev/null 2>&1; then
@@ -137,10 +147,29 @@ for cxx in $CXX_LIST; do
 
     fph_info "lookup-path disassembly: $cxx"
     fph_info "  head : $HEAD_INCLUDE"
-    fph_info "  base : $BASE_LABEL"
 
-    dump base "$BASE_INCLUDE" "$WORK/base.raw" "$BASE_LABEL"
+    # This revision first, always. The base side is the one with a way through
+    # -- fph_base_side_unbuildable, which a label or a push turns into exit 0 --
+    # and it is only entitled to that when this revision's side has already
+    # built with this compiler and this probe. Measured, with the base side
+    # first: a syntax error in asm_probe.cpp, and a compiler wrapper that failed
+    # every invocation, each came out as "the base predates the change" and
+    # exit 0 on a push, and as a request for the allow-lookup-asm-change label
+    # on a pull request -- after which every later run reported green having
+    # disassembled nothing. asm_probe.cpp is compiled by nothing but this gate,
+    # so no other job would have caught it.
     dump head "$HEAD_INCLUDE" "$WORK/head.raw" "this revision"
+
+    # Announced after the loop, not here: exiting from inside it would drop a
+    # compiler this job asked for and did not find, which is a cell that never
+    # ran and has to outrank "there was nothing to compare against".
+    if [ "$HAVE_BASE" = 0 ]; then
+        no_base=1
+        break
+    fi
+
+    fph_info "  base : $BASE_LABEL"
+    dump base "$BASE_INCLUDE" "$WORK/base.raw" "$BASE_LABEL"
 
     awk "$SPLIT" "$WORK/base.raw" > "$WORK/base.sym"
     awk "$SPLIT" "$WORK/head.raw" > "$WORK/head.sym"
@@ -203,7 +232,7 @@ for cxx in $CXX_LIST; do
 
     if fph_report_only; then
         fph_announce warning "$GATE: reported, not gated" \
-            "the lookup path's machine code changed under $cxx. This run was triggered by a push, so the commit has already landed. The diff is in the log."
+            "the lookup path's machine code changed under $cxx. This run reports a commit that has already landed, so it does not gate. The diff is in the log."
         fph_info ""
         continue
     fi
@@ -216,6 +245,14 @@ for cxx in $CXX_LIST; do
     fph_error "  * tests/ci/check-asm.sh --allow-change   (locally)"
     overall=1
 done
+
+if [ "$no_base" = 1 ]; then
+    # The head side disassembled, so the probe, the compiler and objdump all
+    # work; there is simply no predecessor to compare them against.
+    [ "$overall" -eq 0 ] || exit "$overall"
+    fph_no_base "$GATE"
+    exit 0
+fi
 
 if [ "$measured" -eq 0 ]; then
     fph_error "no compiler was usable, so nothing was disassembled and nothing was checked"
