@@ -151,13 +151,35 @@ fph_rule
 LC_ALL=C join -a1 -a2 -e MISSING -o 0,1.2,2.2 "$WORK/ref.txt" "$WORK/head.txt" \
     > "$WORK/joined.txt"
 
-# One probe source builds both sides, so the two must report the same counters.
-# A counter on one side only means one of the runs is incomplete, not that the
-# workload is new, and an ungated counter is one nothing is watching.
+# One probe source builds both sides, so a counter reported by one of them and
+# not the other is a counter nothing was able to compare.
 #
-# That makes it a failure to measure rather than a difference: it leaves through
-# exit 3 and not through the exit 1 that a label or an already-landed commit
-# turns green. Nothing signed off makes a half-reported run into a comparison.
+# It is NOT a run that stopped early. Both sides have already been through
+# measure(), which requires the probe's own `probe_complete 1` last line, so by
+# the time the join runs neither side can be truncated. What is left is a probe
+# whose text compiles differently against the two include trees -- an #ifdef on
+# a macro the new API defines, which is the considerate way to probe new API
+# because it keeps the base compiling.
+#
+# That used to leave through an unwaivable exit 2, and the asymmetry it created
+# rewarded the cruder change. Measured, one pull request adding a counter behind
+# `#ifdef FPH_HAS_...` and another adding the same counter unconditionally:
+#
+#   probe change            PR, no label   PR + label   push to master
+#   guarded by #ifdef            2              2             2
+#   used unconditionally         2              0             0
+#
+# The unconditional one stops the base compiling, which fph_base_side_unbuildable
+# already treats as a signable "nothing could be compared". Both are the same
+# situation -- this revision has API the base does not -- so both are signed off
+# the same way, with this gate's label, and both report rather than gate on the
+# push that merges them.
+#
+# What stays unwaivable is the floor: if NO counter compared, there is no
+# measurement at all, and no label or already-landed commit turns that into one.
+# The counters that did compare are still gated on for regressions.
+#
+# exit 0 clean, 1 regressed, 3 one-sided, 4 both, 2 nothing compared at all.
 awk '
 {
     name = $1; ref = $2; head = $3
@@ -179,45 +201,70 @@ END {
     printf "%d unchanged, %d improved, %d regressed, %d reported by one side only\n",
            same, nb + 0, nw + 0, na + nr + 0
     if (same + nb + nw == 0) { print "no counter was compared at all"; exit 2 }
-    if (na + nr > 0) { exit 3 }
-    exit nw > 0 ? 1 : 0
+    exit (na + nr > 0 ? 3 : 0) + (nw > 0 ? 1 : 0)
 }
 ' "$WORK/joined.txt" > "$WORK/report.txt" && status=0 || status=$?
 
 cat "$WORK/report.txt"
 fph_rule
 
-if [ "$status" -eq 0 ]; then
+ONE_SIDED=0
+REGRESSED=0
+case "$status" in
+    0) ;;
+    1) REGRESSED=1 ;;
+    3) ONE_SIDED=1 ;;
+    4) ONE_SIDED=1; REGRESSED=1 ;;
+    2) fph_error "the two sides have no counter in common; nothing was compared"
+       exit 2 ;;
+    *) fph_error "the comparison could not be read (awk exited $status)"
+       exit 2 ;;
+esac
+
+# Counters only one side reported. Both probes ran to their last line, so this
+# is a probe that compiles differently against the two trees, not a short run.
+if [ "$ONE_SIDED" -eq 1 ]; then
+    if reason=$(fph_gate_waived "$LABEL"); then
+        fph_announce warning "$GATE: some counters were not compared" \
+            "the probe reports counters against this revision that it does not report against $REFERENCE_LABEL, so those were not compared. Signed off by $reason. The list is in the log."
+    elif fph_report_only; then
+        fph_announce warning "$GATE: some counters were not compared" \
+            "the probe reports counters against this revision that it does not report against $REFERENCE_LABEL, so those were not compared. This run reports an already-landed commit, and the base predates the change."
+    else
+        fph_error "a counter was reported by one side and not the other"
+        fph_error "both probes ran to their last line, so this is not a run that stopped early: it"
+        fph_error "is a probe that compiles differently against the two include trees, which is what"
+        fph_error "an #ifdef on a macro this revision's API defines looks like. Those counters were"
+        fph_error "not compared. Either:"
+        fph_error "  * land the API first and add the probe's counters in a later pull request, or"
+        fph_error "  * say that they cannot be compared yet, with the $LABEL label"
+        fph_error "  * tests/ci/check-counters.sh --allow-change   (locally)"
+        exit 2
+    fi
+fi
+
+if [ "$REGRESSED" -eq 1 ]; then
+    if reason=$(fph_gate_waived "$LABEL"); then
+        fph_announce warning "$GATE waived" \
+            "construction got more expensive under $CXX and was signed off by $reason. The numbers are in the log."
+        exit 0
+    fi
+
+    if fph_report_only; then
+        fph_announce warning "$GATE: reported, not gated" \
+            "construction got more expensive under $CXX. This run reports a commit that has already landed, so it does not gate. The numbers are in the log."
+        exit 0
+    fi
+
+    fph_error "construction got more expensive than $REFERENCE_LABEL"
+    fph_error "these are exact counts, not timings: an increase is real, not noise."
+    fph_error "if it is the intended price of a fix, sign it off with:"
+    fph_error "  * the pull request label  $LABEL   -- adding it starts a new run"
+    fph_error "  * tests/ci/check-counters.sh --allow-change   (locally)"
+    exit 1
+fi
+
+if [ "$ONE_SIDED" -eq 0 ]; then
     fph_info "no counter got worse"
-    exit 0
 fi
-if [ "$status" -eq 2 ]; then
-    fph_error "the two sides have no counter in common; nothing was compared"
-    exit 2
-fi
-if [ "$status" -eq 3 ]; then
-    fph_error "a counter was reported by one side and not the other"
-    fph_error "one probe source builds both sides, so this is a run that stopped early rather"
-    fph_error "than a workload that is new. Those counters were not compared, and no label or"
-    fph_error "already-landed commit makes that into a comparison."
-    exit 2
-fi
-
-if reason=$(fph_gate_waived "$LABEL"); then
-    fph_announce warning "$GATE waived" \
-        "construction got more expensive under $CXX and was signed off by $reason. The numbers are in the log."
-    exit 0
-fi
-
-if fph_report_only; then
-    fph_announce warning "$GATE: reported, not gated" \
-        "construction got more expensive under $CXX. This run reports a commit that has already landed, so it does not gate. The numbers are in the log."
-    exit 0
-fi
-
-fph_error "construction got more expensive than $REFERENCE_LABEL"
-fph_error "these are exact counts, not timings: an increase is real, not noise."
-fph_error "if it is the intended price of a fix, sign it off with:"
-fph_error "  * the pull request label  $LABEL   -- adding it starts a new run"
-fph_error "  * tests/ci/check-counters.sh --allow-change   (locally)"
-exit 1
+exit 0
