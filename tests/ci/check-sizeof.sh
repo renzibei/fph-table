@@ -24,21 +24,30 @@ This gate has no --allow-change and no label, and unlike the other three it
 gates on a push as well. Both follow from what it compares against: a file in
 the tree. A deliberate change is recorded by rewriting that file in the same
 commit, which needs the same write access a label does and is visible in the
-diff, and because the file travels with the commit, the push that merges it
-compares the new sizes against the new file and passes. There is nothing left
-for a sign-off to rescue.
+diff, and usually the push that merges it then compares the new sizes against
+the new file and passes.
+
+Usually, not always: two pull requests that each add a member and each rerun
+update-baselines.sh record the SAME file, so git merges them without a conflict
+and master ends up with both members and a baseline describing one. That push
+goes red, and the fix is a follow-up commit rerunning update-baselines.sh. It
+gates rather than reports because the recorded file stays wrong until it is
+rewritten, so reporting would only move the red onto the next pull request.
 
 The recorded sizes are LP64 sizes, and one file serves every platform because
 every LP64 target measured agrees. A target that genuinely disagrees needs its
 own baseline -- --baseline names one, and the workflow cell for that platform
-passes it -- rather than a way to wave the difference through.
+passes it -- rather than a way to wave the difference through. --update holds to
+that too: it will not write a measurement from a non-LP64 target into the shared
+file, only into one named with --baseline.
 EOF
 }
 
 CXX=${FPH_CI_CXX:-}
 STD=${FPH_CI_STD:-c++17}
 UPDATE=0
-BASELINE="$SELF_DIR/baselines/sizeof.txt"
+SHARED_BASELINE="$SELF_DIR/baselines/sizeof.txt"
+BASELINE="$SHARED_BASELINE"
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -96,6 +105,48 @@ fi
 grep -v '^probe_complete 1$' "$WORK/measured.txt" > "$WORK/records.txt"
 mv "$WORK/records.txt" "$WORK/measured.txt"
 
+# Whether these numbers are LP64 numbers is decided before anything is written
+# or compared, because it is the same question either way: the shared baseline
+# holds the sizes every LP64 target agrees on, and a measurement from another
+# target neither belongs in it nor can be judged against it.
+#
+# This used to sit after --update, so --update never reached it. Reproduced with
+# a stand-in for an ILP32 compiler: `check-sizeof.sh --cxx <it>` exited 2 saying
+# "pointer size is 4, not 8", while `update-baselines.sh --sizeof` on the very
+# same target exited 0 and rewrote the shared baseline with the 32-bit numbers,
+# which would then have failed every LP64 cell in CI.
+#
+# Recording another target's sizes is still allowed; it just needs a file of its
+# own, which is what --baseline names and what lookup-guard.yml would pass from
+# that platform's cell. The destination is compared by resolved path, so another
+# spelling of the shared file is still the shared file.
+fph_same_file() {
+    a_dir=$(dirname "$1"); a_base=$(basename "$1")
+    b_dir=$(dirname "$2"); b_base=$(basename "$2")
+    if a_real=$(cd "$a_dir" 2>/dev/null && pwd); then a_dir=$a_real; fi
+    if b_real=$(cd "$b_dir" 2>/dev/null && pwd); then b_dir=$b_real; fi
+    [ "$a_dir/$a_base" = "$b_dir/$b_base" ]
+}
+
+pointer_size=$(awk '$1 == "sizeof" && $2 == "void*" { print $3 }' "$WORK/measured.txt")
+if [ -z "$pointer_size" ]; then
+    fph_error "the probe did not report sizeof(void*), so its output cannot be trusted"
+    exit 2
+fi
+if [ "$pointer_size" != "8" ] && fph_same_file "$BASELINE" "$SHARED_BASELINE"; then
+    fph_error "pointer size is $pointer_size, not 8; tests/ci/baselines/sizeof.txt records LP64 sizes"
+    if [ "$UPDATE" = "1" ]; then
+        fph_error "writing these numbers there would replace the sizes every LP64 target agrees on"
+        fph_error "with this platform's, and every LP64 cell in CI would then fail against them."
+        fph_error "if this platform needs a baseline, give it one of its own and pass the same"
+        fph_error "--baseline from its cell in .github/workflows/lookup-guard.yml:"
+        fph_error "  tests/ci/check-sizeof.sh --baseline tests/ci/baselines/sizeof-<platform>.txt --update"
+    else
+        fph_error "this platform needs its own baseline before the check means anything here"
+    fi
+    exit 2
+fi
+
 if [ "$UPDATE" = "1" ]; then
     mkdir -p "$(dirname "$BASELINE")"
     cp "$WORK/measured.txt" "$BASELINE"
@@ -105,17 +156,6 @@ fi
 
 if [ ! -f "$BASELINE" ]; then
     fph_error "no baseline at $BASELINE; create it with tests/ci/update-baselines.sh"
-    exit 2
-fi
-
-pointer_size=$(awk '$1 == "sizeof" && $2 == "void*" { print $3 }' "$WORK/measured.txt")
-if [ -z "$pointer_size" ]; then
-    fph_error "the probe did not report sizeof(void*), so its output cannot be trusted"
-    exit 2
-fi
-if [ "$pointer_size" != "8" ]; then
-    fph_error "pointer size is $pointer_size, not 8; tests/ci/baselines/sizeof.txt records LP64 sizes"
-    fph_error "this platform needs its own baseline before the check means anything here"
     exit 2
 fi
 
