@@ -6,10 +6,8 @@
 // attributes, no compiler builtins -- so that the same file can be pointed at
 // MSVC when someone gets round to it. See docs/ci.md.
 //
-// Scope rule: only APIs that a pristine checkout compiles belong here. APIs
-// which do not yet compile are covered by the regression corpus's compile
-// probes instead, where failing to compile is the recorded finding rather than
-// a broken build.
+// Only APIs that a pristine checkout compiles belong here: an API that does not
+// compile yet would turn this into a broken build rather than a gate.
 
 #include "fph/dynamic_fph_table.h"
 #include "fph/meta_fph_table.h"

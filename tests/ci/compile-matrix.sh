@@ -1,19 +1,28 @@
 #!/bin/sh
 # compile-matrix.sh -- compile the library headers with warnings as errors.
-#
-#   tests/ci/compile-matrix.sh                  # every compiler found, every std
-#   tests/ci/compile-matrix.sh --cxx g++-15     # one compiler, every std
-#   tests/ci/compile-matrix.sh --cxx c++ --std c++20
-#
-# What this gates: `tests/ci/compile_probe.cpp`, which instantiates the public
-# surface of all four containers, must compile with -Wall -Wextra -Werror.
-#
-# What this deliberately does NOT gate: `tests/test_fph_table.cpp`. That file
-# has warnings on a pristine checkout (see docs/ci.md) and cleaning it up is not
-# this job's business; the test suite is built without -Werror by CMake.
+# See docs/ci.md for what this gates and why.
 set -eu
 
 . "$(cd "$(dirname "$0")" && pwd)/lib.sh"
+
+usage() {
+    cat <<'EOF'
+compile-matrix.sh -- compile the library headers with warnings as errors.
+
+  tests/ci/compile-matrix.sh                  # every compiler found, every std
+  tests/ci/compile-matrix.sh --cxx g++-15     # one compiler, every std
+  tests/ci/compile-matrix.sh --cxx c++ --std c++20
+
+Gates tests/ci/compile_probe.cpp, which instantiates the public surface of all
+four containers, under -Wall -Wextra -Werror.
+
+Does not gate tests/test_fph_table.cpp: it has warnings on a pristine checkout,
+and the test suite is built without -Werror by CMake.
+
+Compilers are deduplicated by what they resolve to, not by the name they were
+asked for: on macOS c++, g++ and clang++ are three names for one Apple clang.
+EOF
+}
 
 CXX_LIST=""
 STD_LIST=""
@@ -26,7 +35,7 @@ while [ $# -gt 0 ]; do
         --std) STD_LIST="$STD_LIST $2"; shift 2 ;;
         --opt) OPT=$2; shift 2 ;;
         --extra-flags) EXTRA_FLAGS="$EXTRA_FLAGS $2"; shift 2 ;;
-        -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+        -h|--help) usage; exit 0 ;;
         *) fph_error "unknown argument: $1"; exit 2 ;;
     esac
 done
@@ -72,16 +81,27 @@ std_alias() {
 }
 
 WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/fphmatrix.XXXXXX")
-trap 'rm -rf "$WORKDIR"' EXIT INT TERM
+trap 'rm -rf "$WORKDIR"' EXIT
+trap 'rm -rf "$WORKDIR"; exit 130' INT
+trap 'rm -rf "$WORKDIR"; exit 143' TERM
 
 failures=0
 skipped=0
 cells=0
+: > "$WORKDIR/seen"
 for cxx in $CXX_LIST; do
     if ! command -v "$cxx" >/dev/null 2>&1; then
         fph_warn "skipping $cxx: not on PATH"
         continue
     fi
+    # Two names for one binary are one compiler. Reporting them as two cells
+    # would report twice as much coverage as the run actually has.
+    identity=$(fph_compiler_identity "$cxx")
+    if grep -qxF "$identity" "$WORKDIR/seen"; then
+        fph_note "skipping $cxx: same compiler as one already in this run ($identity)"
+        continue
+    fi
+    printf '%s\n' "$identity" >> "$WORKDIR/seen"
     for requested in $STD_LIST; do
         if ! std=$(resolve_std "$cxx" "$requested"); then
             printf 'SKIP  %-12s %-6s  (no spelling of this standard is accepted)\n' \
@@ -108,8 +128,8 @@ done
 
 fph_rule
 if [ "$cells" -eq 0 ]; then
-    fph_error "nothing was checked: no requested compiler/standard combination was usable"
-    fph_error "($skipped combination(s) skipped). A green result here would be meaningless."
+    fph_error "nothing was compiled: no requested compiler/standard combination was usable"
+    fph_error "($skipped combination(s) skipped)"
     exit 2
 fi
 if [ "$failures" -ne 0 ]; then

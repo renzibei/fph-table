@@ -13,9 +13,6 @@
 // instrumented or collected.
 //
 // `tests/ci/check-callgrind.sh` reads the resulting counts. See docs/ci.md.
-//
-// Scenarios match tests/ci/perf_probe.cpp so that the deterministic counts and
-// the wall-clock report describe the same workloads.
 
 #include "fph/dynamic_fph_table.h"
 #include "fph/meta_fph_table.h"
@@ -61,7 +58,6 @@ std::uint64_t SplitMix64(std::uint64_t &state) {
     return z ^ (z >> 31);
 }
 
-// Same keys, same count and same probe order as tests/ci/perf_probe.cpp.
 const std::size_t kElements = 100000;
 const std::size_t kProbes = 1 << 20;
 
