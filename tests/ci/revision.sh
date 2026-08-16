@@ -109,15 +109,49 @@ fph_no_base() {
 # Only include/ is used: the probes and the scripts always come from the head
 # revision, so that a base revision predating tests/ci can still be measured.
 #
-# bsdtar exits 0 on empty input, so on macOS a ref that produces nothing leaves
-# an empty directory behind and reports success; the tree is checked, not the
-# pipeline's status.
+# What comes out is checked three ways, because a base tree that is short of a
+# file or has one truncated does not announce itself: it fails to compile, and a
+# base side that fails to compile is what the gates read as "this change adds
+# API the base does not have" -- a warning and exit 0 on a push. Reproduced by
+# cutting the archive stream short: tar exited 1 with meta_fph_table.h half
+# written, the old `|| :` dropped that status, the directory was not empty so
+# the tree check passed, and the counter gate reported "the base predates the
+# change" and exited 0.
+#
+#   * git archive's status, taken on its own rather than through a pipeline,
+#     where the shell reports only the last command
+#   * tar's status, likewise
+#   * the file count, against what the ref's own tree says is under include/.
+#     This is what catches a stream that stopped early but left tar happy.
+#
+# Not a content check: the extracted tree is allowed to differ from this
+# revision's, since that difference is the whole point of the comparison.
 fph_materialise_base() {
     ref=$1; dir=$2
     mkdir -p "$dir"
-    git -C "$FPH_ROOT" archive "$ref" include 2>/dev/null | tar -x -C "$dir" 2>/dev/null || :
+    if ! git -C "$FPH_ROOT" archive --format=tar "$ref" include \
+            >"$dir/base.tar" 2>"$dir/archive.err"; then
+        fph_error "git archive could not read include/ out of $ref"
+        sed 's/^/  /' "$dir/archive.err" >&2
+        return 1
+    fi
+    if ! tar -x -f "$dir/base.tar" -C "$dir" 2>"$dir/tar.err"; then
+        fph_error "extracting include/ from $ref failed part way through"
+        sed 's/^/  /' "$dir/tar.err" >&2
+        return 1
+    fi
+    rm -f "$dir/base.tar"
+    # bsdtar exits 0 on empty input, so on macOS a ref that produces nothing
+    # gets this far with an empty directory and a clean status.
     if [ ! -d "$dir/include" ] || [ -z "$(ls -A "$dir/include" 2>/dev/null)" ]; then
         fph_error "extracting include/ from $ref produced nothing"
+        return 1
+    fi
+    want=$(git -C "$FPH_ROOT" ls-tree -r --name-only "$ref" -- include | wc -l | tr -d ' ')
+    got=$(find "$dir/include" -type f | wc -l | tr -d ' ')
+    if [ "$want" != "$got" ]; then
+        fph_error "$ref has $want file(s) under include/ and $got arrived; the base tree is incomplete"
+        fph_error "nothing was compared. This is a broken extraction, not a difference between revisions"
         return 1
     fi
     return 0
