@@ -36,9 +36,17 @@ tests/ci/update-baselines.sh --sizeof
 The same workflows run on pushes to `master`, and on a manual run there. Those
 compare against the commit before, and the commit under test has already landed,
 so asm, counters and callgrind report rather than gate — a difference becomes a
-warning annotation instead of a red check. `sizeof` still gates there, and needs
-nothing else to: the baseline file travels in the commit that moves the sizes,
-so the push that merges it compares the new sizes against the new file.
+warning annotation instead of a red check.
+
+`sizeof` still gates there. Usually it has nothing to do, because the baseline
+file travels in the commit that moves the sizes. It is not guaranteed: two pull
+requests that each add a member and each regenerate the baseline write the *same*
+new file, so git merges them without a conflict and `master` ends up with both
+members and a baseline describing one. If that happens the push goes red, and
+the fix is a follow-up commit with `tests/ci/update-baselines.sh --sizeof`. It
+gates rather than reports because the recorded file stays wrong until someone
+rewrites it, and reporting would leave the next pull request red for a
+difference it did not introduce.
 
 On the first push of a branch there is nothing to compare against; the gates
 build this revision's side anyway, say that there was no base, and measure

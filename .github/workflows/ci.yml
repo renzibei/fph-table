@@ -110,10 +110,16 @@ jobs:
       - run: cmake -S tests -B build -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} ${{ matrix.cmake_args }}
       - run: cmake --build build --parallel
       # --no-tests=error, or the job passes when there is nothing to run.
-      # Measured on cmake 3.28.3 (this image) and 4.2.1: a build with no
-      # registered test prints "No tests were found!!!" and exits 0, and so do
-      # `-R` and `-L` with a selector that matches nothing. Deleting every
-      # add_test in tests/CMakeLists.txt left this job green.
+      # Measured on cmake 3.28.3 and 4.2.1: a build with no registered test
+      # prints "No tests were found!!!" and exits 0, and so do `-R` and `-L`
+      # with a selector that matches nothing. Deleting every add_test in
+      # tests/CMakeLists.txt left this job green.
+      #
+      # The flag needs cmake 3.26. This image carries 3.31.6 -- 3.28.3 is what
+      # Ubuntu ships in apt, which is not where the image's cmake comes from.
+      # An older ctest does not reject the flag, it ignores it: measured on
+      # 3.16.9, the run is byte-identical to plain ctest and exits 0 with no
+      # tests registered, so the protection would vanish silently.
       - run: ctest --test-dir build --output-on-failure --parallel 2 --no-tests=error
 
   # AddressSanitizer + UndefinedBehaviorSanitizer over the same ctest set.

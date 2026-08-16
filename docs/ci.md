@@ -89,18 +89,19 @@ sha, `HEAD~1`, or an empty box all work.
 
 A check reports success only when it took its measurement and the measurement
 passed. A crashed probe, a compiler that is not installed, a disassembly that
-came out empty, a base tree that arrived incomplete, a counter or a scenario
-that only one side reported, zero matching tests: each of those fails the job,
-on every event, and no label changes that. `ctest` is passed `--no-tests=error`
-for the last of them, because on its own it exits 0 when nothing matches.
+came out empty, a base tree that arrived incomplete, a comparison in which *no*
+counter or scenario matched at all, zero matching tests: each of those fails the
+job, on every event, and no label changes that. `ctest` is passed
+`--no-tests=error` for the last of them, because on its own it exits 0 when
+nothing matches.
 
 Every gate that has a base side measures this revision first and the base
 second, so a failure to build or run is charged to the side that caused it.
 Reaching the base side first turns a broken probe or a missing compiler into
 "the base predates this change", which is green on a push.
 
-Three things finish green without a measurement, and each says so in a warning
-annotation and a line in the job summary:
+Four things finish green without a full measurement, and each says so in a
+warning annotation and a line in the job summary:
 
 - A push whose predecessor does not exist — the first push of a branch. The
   head side is still built first, so this is green only when the gate is
@@ -110,6 +111,10 @@ annotation and a line in the job summary:
 - A push whose predecessor cannot build the probe, which is what merging such a
   pull request looks like: the base is then the `master` before the merge, and
   by definition it does not have the new API.
+- A pull request whose probe reports *some* counters against this revision that
+  it cannot report against the base — a counter behind an `#ifdef` on a macro
+  the new API defines — once it carries that gate's label. The counters that did
+  match are still compared and still gate. See "Adding public API".
 
 Runs of `lookup-guard` on a commit that has already landed — a push to `master`,
 or a manual run on `master` — report rather than gate. Such a run carries no
@@ -119,11 +124,31 @@ would turn `master` red. This covers a measured difference and nothing else.
 Everything in the first paragraph above still fails there.
 
 `sizeof` is the exception: it gates on every event, including a push. It
-compares against `tests/ci/baselines/sizeof.txt`, which travels in the same
-commit as the change that moves it, so the push that merges a recorded change
-compares the new sizes against the new file and passes. There is no state in
-which reporting rather than gating would save it, and nothing for a label to
-rescue.
+compares against `tests/ci/baselines/sizeof.txt`, a file in the tree, and
+usually that file travels in the commit that moves the sizes, so the push that
+merges a recorded change compares the new sizes against the new file and passes.
+
+That is the usual case, not a guarantee, and the reason this gate keeps gating is
+not that a merge cannot redden `master`. It can, with no conflict. Reproduced
+with real git: two pull requests each add a member to the table object, and each
+regenerates the baseline — which for both is the *same* edit, the same 41
+records, `sizeof DynamicFphMap<u64,u64>` going 56 to 64. Git takes the identical
+baseline edit once and both header additions, merges clean, and merged `master`
+then measures 72 against a baseline that says 64. No conflict, no label, and
+report-only deliberately withheld.
+
+It gates there anyway, because the alternative is worse. The recorded file stays
+wrong until somebody rewrites it, so with report-only on pushes the merge would
+go green and the *next* pull request would go red for a difference it did not
+introduce. Reproduced on that same merged `master`: a pull request changing only
+`docs/ci.md` fails the `sizeof` gate. Gating the push puts the red on the commit
+that caused it, one commit after the cause, where the fix is a follow-up commit
+running `tests/ci/update-baselines.sh --sizeof`.
+
+That is the real difference from the other three. They compare against a
+revision, so a signed-off difference leaves nothing behind on `master` for the
+next pull request to trip over. `sizeof` compares against an artifact, and a
+stale artifact is everyone's problem until it is fixed.
 
 ## Method
 
@@ -182,6 +207,17 @@ The push that merges such a pull request hits the same wall, because its base
 is the `master` before the merge. There it is a warning and the job stays green,
 for the same reason every other difference on an already-landed commit is.
 
+The considerate version of the same thing is to guard the new probe code with
+`#ifdef` on a macro the new API defines, so that the base still compiles and
+everything else is still measured. The counters gate treats that identically:
+the guarded counters are reported on one side only, it names them, and the same
+label signs them off — while the counters that did compile on both sides are
+still compared and can still fail the gate on their own. That is deliberate.
+The two routes used to disagree: measured, an `#ifdef`-guarded counter was an
+unwaivable exit 2 on the pull request *and* on the merge push, while the blunt
+unconditional version was waivable by label and green on the push, so the
+mechanism rewarded the cruder change.
+
 ## Lookup asm
 
 `check-asm.sh` builds the lookup path as standalone symbols from both revisions
@@ -211,10 +247,11 @@ tests/ci/update-baselines.sh --sizeof
 
 This gate has no label and no `--allow-change`, and it gates on a push as well
 as on a pull request. Both follow from comparing against a file in the tree
-rather than against another revision. Rewriting the file needs the same write
-access a label needs and is visible in the diff, and because the file travels in
-the commit that changes the sizes, the push that merges it compares the new
-sizes against the new file and passes.
+rather than against another revision: rewriting the file needs the same write
+access a label needs and is visible in the diff. Why it keeps gating on a push,
+given that two pull requests can merge cleanly into sizes the recorded file does
+not describe, is in "What a green check means" above — briefly, reporting
+instead would move the red off the merge and onto the next pull request.
 
 If a platform ever disagrees while the others still hold, the answer is a
 baseline of its own rather than a way to wave the difference through:
@@ -222,6 +259,11 @@ baseline of its own rather than a way to wave the difference through:
 `--baseline` goes on that platform's cell in `lookup-guard.yml`. Until that
 happens there is one file, and `fph_platform_tag` in `lib.sh` names a platform
 for the `--print` headers rather than choosing a baseline.
+
+`--update` will not write a measurement from a non-LP64 target into the shared
+file — it refuses and points at `--baseline` — so recording a 32-bit build's
+sizes takes a deliberate second flag rather than a plain
+`update-baselines.sh --sizeof` on the wrong machine.
 
 ## Counters
 
@@ -241,11 +283,23 @@ because the asm gate proves the lookup *code* is unchanged and cannot see the
 *data layout*: the parameter search can pick a geometry that spreads the same
 keys over more cache lines while the disassembly stays byte-identical.
 
-Both probe runs must reach their last workload. One probe source builds both
-sides, so a counter that appears on one side only means a run stopped early, and
-the check fails with exit 2 rather than treating it as new. That is a failure to
-measure and not a difference, so no label and no already-landed commit turns it
-green. The callgrind gate treats a scenario reported by one side the same way.
+Both probe runs must reach their last workload — the probe's own
+`probe_complete 1` line — or the gate fails with exit 2, unwaivably.
+
+Because that is checked on both sides before anything is compared, a counter
+that then appears on one side only is *not* a run that stopped early. It is a
+probe whose text compiles differently against the two include trees, which is
+what an `#ifdef` on a macro the new API defines looks like — the considerate way
+to probe new API, because it keeps the base compiling. Those counters were not
+compared, so the gate says so and asks for the same label that signs off a base
+which cannot build the probe at all. The counters that did match are compared
+and gate as usual. If *no* counter matched, nothing was measured and no label
+helps.
+
+The callgrind gate has the same rule written down, but its scenario list is
+fixed in the script and applied to both sides, so its two sides always report
+the same names and the branch cannot fire. It is kept as a guard, not as a path
+anyone takes.
 
 The probe serves every allocation from a fixed 512 MiB arena, which is what
 makes the counts reproducible; it is `.bss`, so untouched pages cost nothing.
@@ -303,8 +357,32 @@ The parser requires the callgrind output to name `Ir`, `D1mr` and `D1mw`. A
 column it cannot find would read as zero on both sides and compare equal, which
 would retire half the gate without saying so.
 
-Branch simulation is off; valgrind's predictor is a 2004 bimodal model and
-reported 14 mispredicts per million probes here.
+Branch simulation is off — but not because mispredicts are negligible here.
+That was claimed and does not hold. Measured with `--branch-sim=yes`, over the
+1,048,576 probes each scenario runs, in mispredicts per million probes:
+
+| scenario | g++ 13 | clang++ 18 |
+| --- | --- | --- |
+| `dyn_map_hit` | 9.5 | 11.4 |
+| `dyn_map_miss` | 10.5 | 9.5 |
+| `dyn_map_find` | 6.7 | 6.7 |
+| `meta_map_hit` | 9.5 | 11.4 |
+| `meta_map_miss` | **11,249** | **449,984** |
+| `meta_map_find` | 4.8 | 1.9 |
+
+`Bi` and `Bim` are zero in all twelve cells, so every one of these is a
+conditional branch. Five of the six scenarios sit in the single digits per
+million; `meta_map_miss` is three to five orders of magnitude above them, and
+under clang++ nearly half of its conditional branches mispredict.
+
+It stays off because these are properties of valgrind's model rather than of any
+machine the library runs on. The cg-manual describes predictors "intended to be
+typical of mainstream desktop/server processors of around 2004", and the
+conditional one is an array of 16384 2-bit saturating counters indexed partly by
+branch address and partly by recent taken/not-taken history — gshare-like, not
+the bimodal model this file used to claim. Turning it on later is cheap:
+measured, `--branch-sim=yes` left `Ir` and `D1mr` bit-identical in all twelve
+cells, so it does not disturb what the gate compares today.
 
 ## Tests
 
@@ -324,12 +402,24 @@ ctest --test-dir build --output-on-failure --no-tests=error
 `ctest -L correctness`, `-LE slow` and `-R <name>` work as usual.
 
 `--no-tests=error` is there because without it `ctest` exits 0 when it has
-nothing to run. Measured on cmake 3.28.3, which is what the `ubuntu-24.04` image
-carries, and on 4.2.1: a build with no registered test prints `No tests were
-found!!!` and exits 0, and `-R` and `-L` with a selector that matches nothing do
-the same. Deleting every `add_test` from `tests/CMakeLists.txt` left the job
-green. With the flag each of those exits 8. A cmake old enough not to know the
-flag rejects it outright; there, `ctest -N` lists what a run would have done.
+nothing to run. Measured on cmake 3.28.3 and on 4.2.1: a build with no
+registered test prints `No tests were found!!!` and exits 0, and `-R` and `-L`
+with a selector that matches nothing do the same. Deleting every `add_test` from
+`tests/CMakeLists.txt` left the job green. With the flag each of those exits 8.
+
+3.28.3 is what Ubuntu 24.04 ships in apt; it is not what the runner has. The
+`ubuntu-24.04` image that ran this branch — release `20260810.271` — carries
+cmake **3.31.6**, installed outside apt.
+
+The flag needs cmake 3.26 or newer. An older `ctest` does not reject it, it
+ignores it. Measured on 3.16.9: `ctest --no-tests=error` on a build with no
+registered test produces output byte-identical to plain `ctest`, says nothing on
+either stream, and **exits 0** — the protection disappears without a word. That
+is not special treatment of this flag; 3.16.9 silently ignores every unknown
+option, and even 3.28.3 exits 0 on `--totally-bogus-flag`. What ctest validates
+is the *value* of a flag it already knows, so `--no-tests=bogus` is an error
+while an unrecognised flag is not. On anything older than 3.26, check with
+`ctest -N`, which lists what a run would have done.
 
 The benchmark is not registered unless you configure with
 `-DFPH_ENABLE_BENCHMARK_TEST=ON`.
