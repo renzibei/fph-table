@@ -80,11 +80,22 @@ const std::size_t kHeaderSize = sizeof(BlockHeader);  // 32 on every LP64 target
 // the property that makes the counts reproducible.
 //
 // .bss, so only the pages actually touched are ever committed and the size
-// costs nothing until it is used. Measured high-water mark on an unmodified
-// checkout: 13.3 MB, 51 MB with the default load factor raised to 0.9, 239 MB
-// at 0.97. The size below is 512 MiB because a change that makes the parameter
-// search restart far more often reaches the old 128 MiB, and exhaustion is a
-// failure to measure that no label can sign off.
+// costs nothing until it is used. How much one run consumes was measured by
+// raising DEFAULT_MAX_LOAD_FACTOR in the headers and printing g_arena_used
+// after the last workload, built the way the gate builds this file:
+//
+//   default max_load_factor            Linux/libstdc++   macOS/libc++
+//   0.6, unmodified                          12.7 MiB       12.7 MiB
+//   0.9, dynamic_fph_table.h only            34.8 MiB       30.6 MiB
+//   0.9, both headers                        56.9 MiB       48.4 MiB
+//   0.97, dynamic_fph_table.h only          143.5 MiB      120.2 MiB
+//   0.97, both headers                      274.2 MiB      227.7 MiB
+//
+// gcc 13 and clang 18 agree to the byte on Linux; libc++ runs lower on the same
+// edits, because the parameter search draws from std::uniform_int_distribution
+// and the two libraries answer it differently. Hence 512 MiB rather than the
+// 128 MiB this replaced, which the fourth row exhausts on Linux and not on
+// macOS -- and exhaustion is a failure to measure that no label can sign off.
 //
 // It cannot grow much further. The default code model addresses statics with a
 // signed 32-bit displacement, so 2 GiB of .bss does not link on x86-64
@@ -463,10 +474,11 @@ void CopyCountedMap() {
 //
 // 20000 keys rather than more: the arena above never reuses a freed block, so
 // its consumption scales with how many times the parameter search restarts, and
-// a search made harder on purpose has to fit too. Measured, both maps together:
-// 13 MiB of the 512 MiB arena at this size and the default load factor, and 51
-// MiB with the load factor raised to 0.9, where the search restarts far more.
-// At 100000 the same 0.9 run needs more than 768 MiB.
+// a search made harder on purpose has to fit too. Both maps together take
+// 12.7 MiB of the 512 MiB arena at this size and the default load factor, and
+// 56.9 MiB with the load factor raised to 0.9 in both headers, where the search
+// restarts far more. At 100000 keys that same 0.9 edit exhausts a 1900 MiB
+// arena, which is about as large as .bss can be made here.
 
 const std::size_t kGeometryElements = 20000;
 
