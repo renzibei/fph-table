@@ -12,15 +12,19 @@ check-sizeof.sh -- the containers must stay exactly the size they are.
 
   tests/ci/check-sizeof.sh                 # against tests/ci/baselines/sizeof.txt
   tests/ci/check-sizeof.sh --cxx g++
+  tests/ci/check-sizeof.sh --std c++20
+  tests/ci/check-sizeof.sh --baseline FILE # compare against another baseline
   tests/ci/check-sizeof.sh --update        # rewrite the baseline on purpose
 
 An exact comparison in both directions. Growing the table object costs every
 lookup a wider cache footprint; shrinking it means the layout was rearranged.
 Either way the fix is to update the baseline in the commit that changes it.
 
+This gate has no --allow-change: it compares against a checked-in file, so a
+deliberate change is recorded by rewriting that file rather than signed off.
+
 The recorded sizes are LP64 sizes. On a target where they cannot hold, this
-fails rather than skipping: a check that reports success without comparing
-anything is worse than one that says it cannot run here.
+fails rather than skipping; that target needs its own baseline first.
 EOF
 }
 

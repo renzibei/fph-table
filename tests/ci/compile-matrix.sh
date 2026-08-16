@@ -12,6 +12,8 @@ compile-matrix.sh -- compile the library headers with warnings as errors.
   tests/ci/compile-matrix.sh                  # every compiler found, every std
   tests/ci/compile-matrix.sh --cxx g++-15     # one compiler, every std
   tests/ci/compile-matrix.sh --cxx c++ --std c++20
+  tests/ci/compile-matrix.sh --opt -O0        # default -O2
+  tests/ci/compile-matrix.sh --extra-flags -m32
 
 Gates tests/ci/compile_probe.cpp, which instantiates the public surface of all
 four containers, under -Wall -Wextra -Werror.
@@ -19,8 +21,13 @@ four containers, under -Wall -Wextra -Werror.
 Does not gate tests/test_fph_table.cpp: it has warnings on a pristine checkout,
 and the test suite is built without -Werror by CMake.
 
-Compilers are deduplicated by what they resolve to, not by the name they were
-asked for: on macOS c++, g++ and clang++ are three names for one Apple clang.
+This gate has no --allow-change. There is nothing to sign off: either the
+headers compile clean or they do not.
+
+Compilers are deduplicated by their target triple and predefined macros, not by
+the name they were asked for: on macOS c++, g++ and clang++ are three names for
+one Apple clang, and under a ccache masquerade directory two different
+compilers are two links to one wrapper.
 EOF
 }
 

@@ -146,6 +146,7 @@ tests/ci/check-asm.sh          # the lookup path's machine code must not change
 tests/ci/check-sizeof.sh       # the containers must stay exactly the size they are
 tests/ci/check-counters.sh     # construction must not allocate or copy more
 tests/ci/check-callgrind.sh    # the lookup loop's instruction and cache-miss counts
+                               # (Linux and valgrind; --skip-unsupported elsewhere)
 ```
 
 Lookup cost is gated on disassembly and on simulated counts rather than on
