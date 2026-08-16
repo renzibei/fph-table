@@ -18,7 +18,10 @@ on:
   workflow_dispatch:
     inputs:
       base:
-        description: revision to compare against; the merge base with master if empty
+        description: >-
+          revision to compare against, as a sha or HEAD~1. Empty takes the merge
+          base with master, and on master the commit before. Naming the branch
+          being run, master included, names this same revision and fails.
         required: false
 
 permissions:
@@ -41,7 +44,9 @@ env:
   # On a push it is the event's predecessor. On a manual run it is whatever was
   # typed, and empty means the script works it out -- there is no default here,
   # because a checkout has origin/master and no local master, so a default of
-  # "master" resolves to nothing on a branch and to HEAD on master.
+  # "master" resolves to nothing on a branch and to HEAD on master. Naming the
+  # branch that is checked out now fails with a message saying so, rather than
+  # announcing that there was nothing to compare against and exiting 0.
   FPH_CI_BASE_REF: ${{ github.event_name == 'push' && github.event.before || inputs.base }}
   # The JSON array, so a label is matched whole rather than as a substring of a
   # longer one.

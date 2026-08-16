@@ -13,8 +13,8 @@
 #
 # Prints the resolved sha and returns 0. Returns 3 for "no base was named",
 # which the caller announces and finishes without a measurement. Returns 1 when
-# a base WAS named and cannot be found: that is a broken configuration, not an
-# absent predecessor, and it fails.
+# a base WAS named and cannot be found, or names this same revision: either is a
+# broken configuration rather than an absent predecessor, and it fails.
 #
 # On a pull request the base has to be the merge base and not the base sha from
 # the event payload. That sha is a snapshot taken when the payload was written,
@@ -23,19 +23,31 @@
 # with master's change. Reproduced: a comment-only pull request failed the asm
 # gate for a mask change that had landed on master after it was opened.
 #
-# A base that resolves to HEAD is reported as 3, not as a comparison. Building
-# the same revision twice produces an identical result whatever the revision
-# contains, so it measures nothing. The one exception is a dirty working tree:
-# there the head side is the files on disk and the base side is HEAD, which is a
-# real comparison, and that is the local edit-and-check loop.
+# A base that resolves to HEAD measures nothing: building the same revision
+# twice produces an identical result whatever the revision contains. What that
+# means depends on who chose it. Worked out here, it is reported as 3 and the
+# gate announces that it had nothing to compare against. Named by a person or by
+# the workflow, it is a broken configuration and fails, the same way a named base
+# that does not exist does. Reproduced: a manual run on master with `base:
+# master` in the dispatch form. actions/checkout makes a local master at HEAD,
+# so the name resolved to this same revision, and every gate announced "no
+# revision to compare against ... expected only on the first push of a branch"
+# and exited 0 having measured nothing.
+#
+# The one exception, for either channel, is a dirty working tree: there the head
+# side is the files on disk and the base side is HEAD, which is a real
+# comparison, and that is the local edit-and-check loop.
 fph_resolve_base_ref() {
     explicit=${1:-}
     candidate=""
+    named=0
 
     if [ -n "$explicit" ]; then
         candidate=$explicit
+        named=1
     elif [ -n "${FPH_CI_BASE_REF:-}" ]; then
         candidate=$FPH_CI_BASE_REF
+        named=1
     elif [ -n "${FPH_CI_BASE_BRANCH:-}" ]; then
         # A checkout has the branch as a remote-tracking ref, not a local one.
         for probe in "origin/$FPH_CI_BASE_BRANCH" "$FPH_CI_BASE_BRANCH"; do
@@ -86,6 +98,15 @@ fph_resolve_base_ref() {
 
     if [ "$sha" = "$(git -C "$FPH_ROOT" rev-parse HEAD 2>/dev/null)" ] &&
             git -C "$FPH_ROOT" diff --quiet HEAD -- include 2>/dev/null; then
+        if [ "$named" = 1 ]; then
+            fph_error "the base $candidate is this same revision, so there is nothing to compare"
+            fph_error "a checkout puts the branch you are on at HEAD, so naming that branch -- master,"
+            fph_error "on a manual run of the workflow on master -- names this revision. Name a"
+            fph_error "revision that is not HEAD (a sha, HEAD~1, origin/master from a branch), or"
+            fph_error "leave it empty and let the script take the merge base, and on master the"
+            fph_error "commit before"
+            return 1
+        fi
         return 3
     fi
 
