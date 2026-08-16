@@ -3,13 +3,15 @@
 // The table object itself is on the lookup path: a caller holds it by value or
 // by reference and every find() dereferences its members, so its size and
 // layout are performance-relevant, not cosmetic. `tests/ci/check-sizeof.sh`
-// compares this output against tests/ci/baselines/sizeof-<platform>.txt for
-// EXACT equality -- growing is a regression, and shrinking means the layout
-// moved and wants a human to look at it.
+// compares this output against tests/ci/baselines/sizeof.txt for EXACT
+// equality -- growing is a regression, and shrinking means the layout moved.
 //
 // Output format, one record per line:
 //   sizeof <name> <bytes>
 //   alignof <name> <bytes>
+//
+// The last line is `probe_complete 1`. check-sizeof.sh requires it, so output
+// that stops early is a failure rather than a short list that happens to match.
 
 #include "fph/dynamic_fph_table.h"
 #include "fph/meta_fph_table.h"
@@ -79,5 +81,6 @@ int main() {
     Report<fph::MetaFphMap<std::uint64_t, std::uint64_t>::const_iterator>(
             "MetaFphMap<u64,u64>::const_iterator");
 
+    std::printf("probe_complete 1\n");
     return 0;
 }

@@ -1,15 +1,12 @@
 // Counts what a fixed workload costs, deterministically.
 //
-// Wall-clock cannot gate anything on a shared CI runner, but the number of
-// allocations a build performs, the bytes it asks for, its peak footprint and
-// the number of times it copies or moves a key are exact integers that do not
-// depend on how busy the machine is. They are the deterministic proxy for
-// "this change made construction more expensive".
+// The number of allocations a build performs, the bytes it asks for, its peak
+// footprint and the number of times it copies or moves a key are exact integers
+// that do not depend on how busy the machine is.
 //
-// `tests/ci/check-counters.sh` compares this output against
-// tests/ci/baselines/counters-<platform>.txt as UPPER BOUNDS (<=), so any
-// improvement passes without touching the baseline and only a regression
-// fails. See docs/ci.md for how to move a bound on purpose.
+// `tests/ci/check-counters.sh` builds this probe against two revisions and
+// compares the two outputs as UPPER BOUNDS (<=), so any improvement passes and
+// only a regression fails.
 //
 // Determinism, and what it rests on:
 //   * The library's parameter search seeds a std::mt19937_64 from a fixed seed
@@ -28,15 +25,16 @@
 //     allocator happens to place things. Serving every allocation from a bump
 //     arena, so the layout is a pure function of the allocation sequence, makes
 //     the whole program reproducible: 15/15 identical runs with ASLR still on.
-//     This is a property of the library worth knowing about; here it is simply
-//     removed, because a gate that is 66% noisy is not a gate.
 //   * The library's own search does use std::uniform_int_distribution, so the
 //     counts still differ between libstdc++ and libc++, and between compiler
-//     versions. That is why the recorded baselines are tagged by toolchain and
-//     why CI compares against the merge base built in the same job instead.
+//     versions. That is why the reference is a revision built in the same job.
 //
 // Output format, one record per line:
 //   <workload>.<counter> <value>
+//
+// The last line is `probe_complete 1`. check-counters.sh requires it, so a run
+// that stops early is a failure rather than a shorter list of counters that
+// happens to agree with the other side's equally short list.
 
 #include "fph/dynamic_fph_table.h"
 #include "fph/meta_fph_table.h"
@@ -451,11 +449,9 @@ void CopyCountedMap() {
 // bucket and metadata arrays arrives on its own, in the allocation counters, so
 // only the layout figures need computing.
 //
-// The keys are the leading 20000 of the set tests/ci/perf_probe.cpp times, so
-// the deterministic geometry and the wall-clock report describe the same table.
-// Not the whole 100000: the arena above never reuses a freed block, so its
-// consumption scales with how many times the parameter search restarts, and a
-// search made harder on purpose has to fit too. Measured, both maps together:
+// 20000 keys rather than more: the arena above never reuses a freed block, so
+// its consumption scales with how many times the parameter search restarts, and
+// a search made harder on purpose has to fit too. Measured, both maps together:
 // 13 MiB of the 128 MiB arena at this size and the default load factor, and 51
 // MiB with the load factor raised to 0.9, where the search restarts far more.
 // At 100000 the same 0.9 run needs more than 768 MiB.
@@ -579,5 +575,6 @@ int main() {
     RunGeometry<DynIntMap>("dyn_map_geometry_20000");
     RunGeometry<MetaIntMap>("meta_map_geometry_20000");
 
+    std::printf("probe_complete 1\n");
     return 0;
 }

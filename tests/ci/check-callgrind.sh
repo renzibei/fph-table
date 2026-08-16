@@ -1,61 +1,43 @@
 #!/bin/sh
 # check-callgrind.sh -- the lookup loop must execute the same instructions and
 # touch no more cache lines than the base revision.
-#
-#   tests/ci/check-callgrind.sh                 # head vs merge base
-#   tests/ci/check-callgrind.sh --base master --cxx g++
-#   tests/ci/check-callgrind.sh --print         # just show the numbers
-#   tests/ci/check-callgrind.sh --allow-change  # sign off a change
-#
-# Linux only. Valgrind has no macOS arm64 port, so this leg does not exist on
-# the macOS runner and the script skips itself rather than failing there.
-#
-# Why this gate exists alongside check-asm.sh: the asm gate proves the machine
-# code of the lookup path is unchanged, and that is not the same as proving the
-# cost is unchanged. max_load_factor is a runtime parameter; changing its
-# default leaves the disassembly byte-identical while moving the work the loop
-# does. Measured on this library, meta_map_miss, 0.6 -> 0.9: instructions
-# +0.078%, simulated D1 misses -8.61%, wall clock -9.24%. The instruction count
-# is blind to that change and the D1 miss count tracks it almost exactly.
-#
-# The two counters are gated differently because they behave differently:
-#
-#   Ir   instructions executed in the loop. Measured on this repository's own
-#        branches: bit-identical across repeats, and 0.0000% different across a
-#        commit that changed only construction, in all ten scenario x compiler
-#        cells. So it is gated at EXACT EQUALITY -- any movement is a real
-#        change of code path. Note it is a detector, not an estimator: on the
-#        one known lookup improvement it moved between 0.76x and 3.85x the
-#        measured time change, because a wider vectorised loop counts one
-#        instruction regardless of how much work it does. Do not read a
-#        percentage here as a percentage of speed.
-#
-#   D1m  simulated first-level data cache misses. Same-binary repeats are
-#        bit-identical, but the count depends on where the heap lands, so a
-#        change to construction alone moved it by up to 0.011%. Gated as an
-#        UPPER BOUND with 1% of headroom, which is about ninety times the
-#        measured drift; a reduction passes with nothing to update.
-#
-# Branch simulation is deliberately off. Valgrind's predictor is a bimodal
-# model from 2004 and reported 14 mispredicts per million probes on this
-# workload, which is not a number about any real processor.
-#
-# Both sides are built here, in this job, with this compiler, for the same
-# reason as every other gate: a runner or compiler change moves both at once.
-#
-# Overriding a deliberate change: --allow-change, the `allow-cost-increase`
-# pull request label, or [allow-cost-increase] in a commit message.
+# See docs/ci.md for what this gates and why.
 set -eu
 
 SELF_DIR=$(cd "$(dirname "$0")" && pwd)
 . "$SELF_DIR/lib.sh"
 . "$SELF_DIR/revision.sh"
 
+GATE="lookup cost"
+LABEL=allow-lookup-cost-increase
+
+usage() {
+    cat <<'EOF'
+check-callgrind.sh -- the lookup loop's instruction and D1 miss counts.
+
+  tests/ci/check-callgrind.sh                    # head vs the merge base
+  tests/ci/check-callgrind.sh --base master --cxx g++
+  tests/ci/check-callgrind.sh --base-include DIR # compare against a tree on disk
+  tests/ci/check-callgrind.sh --print            # just show the numbers
+  tests/ci/check-callgrind.sh --allow-change     # sign off a change
+  tests/ci/check-callgrind.sh --skip-unsupported # exit 0 where valgrind cannot run
+
+Linux and valgrind only. Without --skip-unsupported, a platform that cannot run
+it is an error, because a check that exits 0 having measured nothing is
+indistinguishable from one that passed.
+
+Ir is compared for exact equality and D1 misses as an upper bound with 1% of
+headroom. Signing off a change needs the allow-lookup-cost-increase pull
+request label, or --allow-change locally.
+EOF
+}
+
 BASE_REF=""
 BASE_INCLUDE=""
 CXX=${FPH_CI_CXX:-}
 PRINT_ONLY=0
 ALLOW=0
+SKIP_UNSUPPORTED=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -64,20 +46,27 @@ while [ $# -gt 0 ]; do
         --cxx) CXX=$2; shift 2 ;;
         --print) PRINT_ONLY=1; shift ;;
         --allow-change) ALLOW=1; shift ;;
-        -h|--help) sed -n '2,47p' "$0"; exit 0 ;;
+        --skip-unsupported) SKIP_UNSUPPORTED=1; shift ;;
+        -h|--help) usage; exit 0 ;;
         *) fph_error "unknown argument: $1"; exit 2 ;;
     esac
 done
 
-# Not being able to run is not a failure: this gate is one platform's leg of a
-# check that also exists as check-asm.sh and the geometry counters.
+unsupported() {
+    if [ "$SKIP_UNSUPPORTED" = "1" ]; then
+        fph_announce warning "$GATE did not run" "$1"
+        exit 0
+    fi
+    fph_error "$1"
+    fph_error "pass --skip-unsupported to make this platform's absence a pass"
+    exit 2
+}
+
 if [ "$(uname -s)" != Linux ]; then
-    fph_info "callgrind: $(uname -s) is not supported by valgrind; skipping"
-    exit 0
+    unsupported "valgrind has no port for $(uname -s), so the lookup loop was not counted"
 fi
 if ! command -v valgrind >/dev/null 2>&1; then
-    fph_info "callgrind: valgrind is not installed; skipping"
-    exit 0
+    unsupported "valgrind is not installed, so the lookup loop was not counted"
 fi
 
 if [ -z "$CXX" ]; then
@@ -116,7 +105,9 @@ fi
 
 INCLUDE=${FPH_CI_INCLUDE:-$FPH_ROOT/include}
 WORK=$(fph_mktempdir)
-trap 'rm -rf "$WORK"' EXIT INT TERM
+trap 'rm -rf "$WORK"' EXIT
+trap 'rm -rf "$WORK"; exit 130' INT
+trap 'rm -rf "$WORK"; exit 143' TERM
 
 build() { # <include-dir> <out>
     $FPH_NICE "$CXX" -std="$BUILD_STD" $BUILD_FLAGS $MARCH -Wall -Wextra \
@@ -147,23 +138,40 @@ measure() {
             exit 2
         fi
         # The totals line carries the events named in the header, in that order,
-        # so the columns are found by name rather than by position.
+        # so the columns are found by name rather than by position. Every event
+        # this gate reads is required to be there: an unnamed column reads as
+        # zero, and zero on both sides compares equal, which would retire half
+        # the gate without saying so.
         awk -v scen="$scenario" '
             /^events:/ { for (i = 2; i <= NF; i++) col[$i] = i - 1; next }
             /^(summary|totals):/ { for (i = 2; i <= NF; i++) v[i - 1] = $i + 0; got = 1 }
             END {
-                if (!got || !("Ir" in col)) { exit 3 }
+                if (!got) { exit 3 }
+                split("Ir D1mr D1mw", need, " ")
+                for (i in need) if (!(need[i] in col)) { exit 5 }
                 ir = v[col["Ir"]]
                 d1 = v[col["D1mr"]] + v[col["D1mw"]]
                 if (ir <= 0) { exit 4 }
                 printf "%s %d %d\n", scen, ir, d1
             }
         ' "$WORK/cg.out" >> "$2" || {
-            fph_error "could not read counts for $scenario out of the callgrind output"
-            fph_error "(an empty count means the collection window never opened)"
+            status=$?
+            case "$status" in
+                3) fph_error "$scenario: the callgrind output has no summary line" ;;
+                4) fph_error "$scenario: the instruction count is zero, so the collection window never opened" ;;
+                5) fph_error "$scenario: the callgrind output does not report all of Ir, D1mr and D1mw" ;;
+                *) fph_error "$scenario: could not read the callgrind output" ;;
+            esac
+            fph_error "events line: $(awk '/^events:/ { print; exit }' "$WORK/cg.out")"
             exit 2
         }
     done
+    expected=$(printf '%s\n' $SCENARIOS | wc -l | tr -d ' ')
+    got=$(wc -l < "$2" | tr -d ' ')
+    if [ "$got" -ne "$expected" ]; then
+        fph_error "counted $got of $expected scenarios; the rest were not measured"
+        exit 2
+    fi
     LC_ALL=C sort -o "$2" "$2"
 }
 
@@ -181,14 +189,20 @@ if [ "$PRINT_ONLY" = "1" ]; then
 fi
 
 if [ -z "$BASE_INCLUDE" ]; then
-    if ! BASE_REF=$(fph_resolve_base_ref "$BASE_REF"); then
-        fph_error "cannot work out what to compare against; pass --base"
-        exit 2
-    fi
-    fph_materialise_base "$BASE_REF" "$WORK/base"
+    set +e
+    BASE_REF=$(fph_resolve_base_ref "$BASE_REF"); resolved=$?
+    set -e
+    case "$resolved" in
+        0) ;;
+        3) fph_no_base "$GATE"; exit 0 ;;
+        *) fph_error "cannot work out what to compare against; pass --base or --base-include"
+           exit 2 ;;
+    esac
+    fph_materialise_base "$BASE_REF" "$WORK/base" || exit 2
     BASE_INCLUDE="$WORK/base/include"
     REFERENCE_LABEL="revision $BASE_REF"
 else
+    [ -d "$BASE_INCLUDE" ] || { fph_error "no such include tree: $BASE_INCLUDE"; exit 2; }
     REFERENCE_LABEL="include tree $BASE_INCLUDE"
 fi
 
@@ -215,11 +229,14 @@ BEGIN {
 }
 {
     name = $1
+    # One probe source builds both sides, so a scenario on one side only means
+    # one of the runs is incomplete, not that the scenario is new.
     if ($2 == "MISSING" || $4 == "MISSING") {
-        printf "%-14s %s\n", name, ($2 == "MISSING" ? "(new scenario)" : "(scenario removed)")
-        if ($2 != "MISSING") removed++
+        printf "%-14s %s\n", name, ($2 == "MISSING" ? "(head only)" : "(base only)")
+        if ($2 == "MISSING") added++; else removed++
         next
     }
+    compared++
     ir_ref = $2 + 0; d1_ref = $3 + 0; ir_head = $4 + 0; d1_head = $5 + 0
     d1_delta = d1_ref > 0 ? (d1_head - d1_ref) / d1_ref * 100.0 : 0
     printf "%-14s %12d %12d %+10d   %12d %12d %+7.2f%%\n",
@@ -230,7 +247,8 @@ BEGIN {
 END {
     printf "\n%d scenario(s) changed instruction count, %d exceeded the D1 miss bound (+%.0f%%)\n",
            ir_changed + 0, d1_worse + 0, (d1_headroom - 1) * 100
-    exit (ir_changed + d1_worse + removed) > 0 ? 1 : 0
+    if (compared + 0 == 0) { print "no scenario was compared at all"; exit 2 }
+    exit (ir_changed + d1_worse + removed + added) > 0 ? 1 : 0
 }
 ' "$WORK/joined.txt" > "$WORK/report.txt" && status=0 || status=$?
 
@@ -241,16 +259,20 @@ if [ "$status" -eq 0 ]; then
     fph_info "the lookup loop executes the same instructions and misses no more often"
     exit 0
 fi
+if [ "$status" -eq 2 ]; then
+    fph_error "the two sides have no scenario in common; nothing was compared"
+    exit 2
+fi
 
-if reason=$(fph_change_allowed '[allow-cost-increase]' allow-cost-increase); then
-    fph_warn "the lookup loop's cost changed and the change is signed off (via $reason)"
+if reason=$(fph_gate_waived "$LABEL"); then
+    fph_announce warning "$GATE waived" \
+        "the lookup loop's cost changed under $CXX and was signed off by $reason. The counts are in the log."
     exit 0
 fi
 
 fph_error "the lookup loop's cost changed against $REFERENCE_LABEL"
 fph_error "these counts are simulated exactly, not timed: a difference is real."
-fph_error "if the change is intended, sign it off with one of:"
-fph_error "  * the pull request label  allow-cost-increase"
-fph_error "  * [allow-cost-increase] in a commit message"
+fph_error "if the change is intended, sign it off with:"
+fph_error "  * the pull request label  $LABEL"
 fph_error "  * tests/ci/check-callgrind.sh --allow-change   (locally)"
 exit 1
