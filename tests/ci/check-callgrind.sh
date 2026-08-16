@@ -237,8 +237,15 @@ BEGIN {
 }
 {
     name = $1
-    # One probe source builds both sides, so a scenario on one side only means
-    # one of the runs is incomplete, not that the scenario is new.
+    # A guard rather than a path anyone takes: the scenario names come from
+    # $SCENARIOS in this script, not from the probe, and measure() has already
+    # required all of them on each side, so the two files always hold the same
+    # names. The counters gate differs -- there the names come from the output
+    # of the probe itself, so an #ifdef on new API can legitimately report a
+    # counter on one side only. Nothing here can compile differently against
+    # the two include trees.
+    #
+    # No apostrophes in this block: it is inside a single-quoted awk program.
     if ($2 == "MISSING" || $4 == "MISSING") {
         printf "%-14s %s\n", name, ($2 == "MISSING" ? "(head only)" : "(base only)")
         if ($2 == "MISSING") added++; else removed++
@@ -256,9 +263,10 @@ END {
     printf "\n%d scenario(s) changed instruction count, %d exceeded the D1 miss bound (+%.0f%%)\n",
            ir_changed + 0, d1_worse + 0, (d1_headroom - 1) * 100
     if (compared + 0 == 0) { print "no scenario was compared at all"; exit 2 }
-    # A scenario on one side only is a run that stopped early, so it leaves
-    # through 3 rather than the 1 that a label or an already-landed commit turns
-    # green: nothing was compared there for either to sign off.
+    # Unreachable, per the note above: it would mean this script asked for
+    # different scenarios on the two sides. Kept as an assertion, and kept
+    # unwaivable, because if it ever does fire the cause is a defect here rather
+    # than anything a pull request could sign off.
     if (added + removed > 0) { exit 3 }
     exit (ir_changed + d1_worse) > 0 ? 1 : 0
 }
