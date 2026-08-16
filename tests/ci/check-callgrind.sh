@@ -109,11 +109,15 @@ trap 'rm -rf "$WORK"' EXIT
 trap 'rm -rf "$WORK"; exit 130' INT
 trap 'rm -rf "$WORK"; exit 143' TERM
 
-build() { # <include-dir> <out>
+build() { # <side> <include-dir> <out>
+    side=$1; shift
     $FPH_NICE "$CXX" -std="$BUILD_STD" $BUILD_FLAGS $MARCH -Wall -Wextra \
         -I"$1" "$SELF_DIR/callgrind_probe.cpp" -o "$2" >"$WORK/build.log" 2>&1 || {
-            fph_error "the callgrind probe does not build against $1"
             sed 's/^/  /' "$WORK/build.log" | head -30
+            if [ "$side" = base ]; then
+                fph_base_side_unbuildable "$GATE" "$LABEL" "$REFERENCE_LABEL"
+            fi
+            fph_error "the callgrind probe does not build against this revision ($1)"
             exit 2
         }
 }
@@ -175,12 +179,14 @@ measure() {
     LC_ALL=C sort -o "$2" "$2"
 }
 
-build "$INCLUDE" "$WORK/head.bin"
+build head "$INCLUDE" "$WORK/head.bin"
 measure "$WORK/head.bin" "$WORK/head.txt"
 
-TAG=$(fph_toolchain_tag "$CXX")
-
 if [ "$PRINT_ONLY" = "1" ]; then
+    # Only --print uses the toolchain tag, and a compiler that will not report
+    # its predefined macros still compiles and still counts. Not being able to
+    # name it is not a reason to fail the gate.
+    TAG=$(fph_toolchain_tag "$CXX") || TAG="unidentified toolchain"
     fph_info "# toolchain: $TAG"
     fph_info "# flags: $BUILD_STD $BUILD_FLAGS $MARCH"
     fph_info "# cache: $CACHE"
@@ -206,7 +212,7 @@ else
     REFERENCE_LABEL="include tree $BASE_INCLUDE"
 fi
 
-build "$BASE_INCLUDE" "$WORK/base.bin"
+build base "$BASE_INCLUDE" "$WORK/base.bin"
 measure "$WORK/base.bin" "$WORK/ref.txt"
 
 fph_info "lookup loop cost under callgrind: $CXX ($BUILD_STD $BUILD_FLAGS $MARCH)"
@@ -270,9 +276,15 @@ if reason=$(fph_gate_waived "$LABEL"); then
     exit 0
 fi
 
+if fph_report_only; then
+    fph_announce warning "$GATE: reported, not gated" \
+        "the lookup loop's cost changed under $CXX. This run was triggered by a push, so the commit has already landed. The counts are in the log."
+    exit 0
+fi
+
 fph_error "the lookup loop's cost changed against $REFERENCE_LABEL"
 fph_error "these counts are simulated exactly, not timed: a difference is real."
 fph_error "if the change is intended, sign it off with:"
-fph_error "  * the pull request label  $LABEL"
+fph_error "  * the pull request label  $LABEL   -- adding it starts a new run"
 fph_error "  * tests/ci/check-callgrind.sh --allow-change   (locally)"
 exit 1

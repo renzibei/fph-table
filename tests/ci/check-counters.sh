@@ -70,11 +70,15 @@ trap 'rm -rf "$WORK"' EXIT
 trap 'rm -rf "$WORK"; exit 130' INT
 trap 'rm -rf "$WORK"; exit 143' TERM
 
-measure() { # <include-dir> <out-file>
+measure() { # <side> <include-dir> <out-file>
+    side=$1; shift
     $FPH_NICE "$CXX" -std="$BUILD_STD" $BUILD_FLAGS -Wall -Wextra \
         -I"$1" "$SELF_DIR/counter_probe.cpp" -o "$WORK/probe" >"$WORK/build.log" 2>&1 || {
-            fph_error "the counter probe does not build against $1"
             sed 's/^/  /' "$WORK/build.log" | head -30
+            if [ "$side" = base ]; then
+                fph_base_side_unbuildable "$GATE" "$LABEL" "$REFERENCE_LABEL"
+            fi
+            fph_error "the counter probe does not build against this revision ($1)"
             exit 2
         }
     # Not a pipeline: `probe | sort` reports sort's status, so a probe that
@@ -99,11 +103,13 @@ measure() { # <include-dir> <out-file>
     grep -v '^probe_complete 1$' "$WORK/raw.txt" | LC_ALL=C sort > "$2"
 }
 
-TAG=$(fph_toolchain_tag "$CXX")
-
-measure "$INCLUDE" "$WORK/head.txt"
+measure head "$INCLUDE" "$WORK/head.txt"
 
 if [ "$PRINT_ONLY" = "1" ]; then
+    # Only --print uses the toolchain tag, and a compiler that will not report
+    # its predefined macros still compiles and still counts. Not being able to
+    # name it is not a reason to fail the gate.
+    TAG=$(fph_toolchain_tag "$CXX") || TAG="unidentified toolchain"
     fph_info "# toolchain: $TAG"
     fph_info "# flags: $BUILD_STD $BUILD_FLAGS"
     cat "$WORK/head.txt"
@@ -127,7 +133,7 @@ else
     [ -d "$BASE_INCLUDE" ] || { fph_error "no such include tree: $BASE_INCLUDE"; exit 2; }
     REFERENCE_LABEL="include tree $BASE_INCLUDE"
 fi
-measure "$BASE_INCLUDE" "$WORK/ref.txt"
+measure base "$BASE_INCLUDE" "$WORK/ref.txt"
 
 fph_info "construction cost: $CXX ($BUILD_STD $BUILD_FLAGS)"
 fph_info "  head      : $INCLUDE"
@@ -183,9 +189,15 @@ if reason=$(fph_gate_waived "$LABEL"); then
     exit 0
 fi
 
+if fph_report_only; then
+    fph_announce warning "$GATE: reported, not gated" \
+        "construction got more expensive under $CXX. This run was triggered by a push, so the commit has already landed. The numbers are in the log."
+    exit 0
+fi
+
 fph_error "construction got more expensive than $REFERENCE_LABEL"
 fph_error "these are exact counts, not timings: an increase is real, not noise."
 fph_error "if it is the intended price of a fix, sign it off with:"
-fph_error "  * the pull request label  $LABEL"
+fph_error "  * the pull request label  $LABEL   -- adding it starts a new run"
 fph_error "  * tests/ci/check-counters.sh --allow-change   (locally)"
 exit 1

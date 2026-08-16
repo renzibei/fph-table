@@ -99,6 +99,29 @@ SPLIT='
 sym != "" { print sym "\t" $0 }
 '
 
+# Everything after the symbol name, which is the whole instruction. llvm-objdump
+# separates the mnemonic from its operands with a tab of its own, so taking one
+# field here compares mnemonics and ignores every operand: the failure summary
+# for `and x10, x8, #0x1` -> `#0x3` came out as an empty table and "0 longer, 0
+# same length but different, 0 shorter".
+INSTRUCTION='$1 == s { sub(/^[^\t]*\t/, ""); print }'
+
+# dump <side> <include-dir> <out> <label> -- disassemble one side, and say which
+# side it was when it fails. asmdump.sh exits 3 for a compile failure.
+dump() {
+    set +e
+    $FPH_NICE "$SELF_DIR/asmdump.sh" "$2" "$3" "$cxx" > "$WORK/dump.log" 2>&1
+    dump_status=$?
+    set -e
+    [ "$dump_status" -eq 0 ] && return 0
+    sed 's/^/  /' "$WORK/dump.log" | head -30
+    if [ "$dump_status" -eq 3 ] && [ "$1" = base ]; then
+        fph_base_side_unbuildable "$GATE" "$LABEL" "$4"
+    fi
+    fph_error "the $1 side ($4) produced no disassembly under $cxx"
+    exit 2
+}
+
 overall=0
 measured=0
 
@@ -116,8 +139,8 @@ for cxx in $CXX_LIST; do
     fph_info "  head : $HEAD_INCLUDE"
     fph_info "  base : $BASE_LABEL"
 
-    $FPH_NICE "$SELF_DIR/asmdump.sh" "$BASE_INCLUDE" "$WORK/base.raw" "$cxx" > /dev/null
-    $FPH_NICE "$SELF_DIR/asmdump.sh" "$HEAD_INCLUDE" "$WORK/head.raw" "$cxx" > /dev/null
+    dump base "$BASE_INCLUDE" "$WORK/base.raw" "$BASE_LABEL"
+    dump head "$HEAD_INCLUDE" "$WORK/head.raw" "this revision"
 
     awk "$SPLIT" "$WORK/base.raw" > "$WORK/base.sym"
     awk "$SPLIT" "$WORK/head.raw" > "$WORK/head.sym"
@@ -149,8 +172,8 @@ for cxx in $CXX_LIST; do
     reordered=0
     printf '  %-34s %8s %8s %8s\n' symbol base head delta
     while IFS= read -r sym; do
-        awk -F'\t' -v s="$sym" '$1 == s { print $2 }' "$WORK/base.sym" > "$WORK/b.one"
-        awk -F'\t' -v s="$sym" '$1 == s { print $2 }' "$WORK/head.sym" > "$WORK/h.one"
+        awk -F'\t' -v s="$sym" "$INSTRUCTION" "$WORK/base.sym" > "$WORK/b.one"
+        awk -F'\t' -v s="$sym" "$INSTRUCTION" "$WORK/head.sym" > "$WORK/h.one"
         if cmp -s "$WORK/b.one" "$WORK/h.one"; then
             continue
         fi
@@ -178,11 +201,18 @@ for cxx in $CXX_LIST; do
         continue
     fi
 
+    if fph_report_only; then
+        fph_announce warning "$GATE: reported, not gated" \
+            "the lookup path's machine code changed under $cxx. This run was triggered by a push, so the commit has already landed. The diff is in the log."
+        fph_info ""
+        continue
+    fi
+
     fph_error "the lookup path changed under $cxx: $longer symbol(s) longer, $reordered same length but different, $shorter shorter"
     fph_error "a shorter lookup path is not automatically an improvement: a static instruction"
     fph_error "count is not a speed proxy, so it needs the same sign-off as a longer one."
     fph_error "if the change is intended, sign it off with:"
-    fph_error "  * the pull request label  $LABEL"
+    fph_error "  * the pull request label  $LABEL   -- adding it starts a new run"
     fph_error "  * tests/ci/check-asm.sh --allow-change   (locally)"
     overall=1
 done

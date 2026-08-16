@@ -23,7 +23,12 @@ trap 'rm -rf "$TMP"' EXIT
 trap 'rm -rf "$TMP"; exit 130' INT
 trap 'rm -rf "$TMP"; exit 143' TERM
 
-$CC -std=c++17 -O2 -DNDEBUG -I"$INC" -c "$DIR/asm_probe.cpp" -o "$TMP/probe.o"
+# Exit 3, distinct from every other failure here, so that check-asm.sh can tell
+# "this include tree cannot build the probe" from "objdump said nothing".
+if ! $CC -std=c++17 -O2 -DNDEBUG -I"$INC" -c "$DIR/asm_probe.cpp" -o "$TMP/probe.o"; then
+    printf 'error: the asm probe does not compile against %s\n' "$INC" >&2
+    exit 3
+fi
 objdump -d --no-show-raw-insn "$TMP/probe.o" > "$TMP/raw.txt"
 
 sed -E \

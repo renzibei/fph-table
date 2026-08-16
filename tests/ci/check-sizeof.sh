@@ -51,8 +51,15 @@ trap 'rm -rf "$WORK"' EXIT
 trap 'rm -rf "$WORK"; exit 130' INT
 trap 'rm -rf "$WORK"; exit 143' TERM
 
+# A build failure here is a failure to measure, not a size difference. Without
+# this it reaches the caller as a raw compiler error and exit 1, which is the
+# same status this script uses for "the sizes moved".
 $FPH_NICE "$CXX" -std="$STD" -O1 -Wall -Wextra -I"$INCLUDE" \
-    "$SELF_DIR/sizeof_probe.cpp" -o "$WORK/sizeof_probe"
+    "$SELF_DIR/sizeof_probe.cpp" -o "$WORK/sizeof_probe" >"$WORK/build.log" 2>&1 || {
+        fph_error "the sizeof probe does not build against $INCLUDE with $CXX -std=$STD"
+        sed 's/^/  /' "$WORK/build.log" | head -30
+        exit 2
+    }
 
 # Not a pipeline: `probe | sort` reports sort's status, so a probe that crashes
 # part way through hands the rest of the script a truncated file and a zero.

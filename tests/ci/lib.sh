@@ -135,3 +135,38 @@ fph_announce() {
         printf -- '- **%s** — %s\n' "$title" "$message" >> "$GITHUB_STEP_SUMMARY"
     fi
 }
+
+# fph_report_only -- is this run reporting rather than gating?
+#
+# Set by the workflow on a push. A push event carries no pull request and so no
+# labels, and the commit has already landed. Without this, merging a pull
+# request whose gate was signed off turns master red on the very next run: the
+# push re-measures the same difference and finds no label to waive it.
+fph_report_only() {
+    case "${FPH_CI_REPORT_ONLY:-}" in
+        1|true|TRUE|yes) return 0 ;;
+    esac
+    return 1
+}
+
+# fph_base_side_unbuildable <gate> <label> <base> -- the base revision will not
+# compile this revision's probe.
+#
+# The probe sources always come from this revision, so this is what a pull
+# request that adds public API and exercises it in a probe looks like. Nothing
+# can be compared, and without a way through, such a pull request cannot land.
+fph_base_side_unbuildable() {
+    gate=$1; label=$2; base=$3
+    if reason=$(fph_gate_waived "$label"); then
+        fph_announce warning "$gate did not run" \
+            "the probe does not build against $base, so nothing was compared. Signed off by $reason."
+        exit 0
+    fi
+    fph_error "the probe built from this revision does not compile against $base"
+    fph_error "the probe sources always come from this revision, so a base side that will not"
+    fph_error "build means this change adds or renames API the base does not have. Nothing"
+    fph_error "was compared. Either:"
+    fph_error "  * land the API first and add the probe's use of it in a later pull request, or"
+    fph_error "  * say that this pull request cannot be compared, with the $label label"
+    exit 2
+}
