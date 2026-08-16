@@ -109,7 +109,12 @@ jobs:
           persist-credentials: false
       - run: cmake -S tests -B build -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} ${{ matrix.cmake_args }}
       - run: cmake --build build --parallel
-      - run: ctest --test-dir build --output-on-failure --parallel 2
+      # --no-tests=error, or the job passes when there is nothing to run.
+      # Measured on cmake 3.28.3 (this image) and 4.2.1: a build with no
+      # registered test prints "No tests were found!!!" and exits 0, and so do
+      # `-R` and `-L` with a selector that matches nothing. Deleting every
+      # add_test in tests/CMakeLists.txt left this job green.
+      - run: ctest --test-dir build --output-on-failure --parallel 2 --no-tests=error
 
   # AddressSanitizer + UndefinedBehaviorSanitizer over the same ctest set.
   # -fno-sanitize-recover=all is what turns a UBSan report into a failure
@@ -131,4 +136,4 @@ jobs:
           -DCMAKE_BUILD_TYPE=
           -DCMAKE_CXX_FLAGS="-O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined -fno-sanitize-recover=all"
       - run: cmake --build build --parallel
-      - run: ctest --test-dir build --output-on-failure
+      - run: ctest --test-dir build --output-on-failure --no-tests=error
