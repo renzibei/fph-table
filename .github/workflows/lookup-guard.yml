@@ -1,17 +1,20 @@
 # The performance gates.
 #
-# Wall-clock cannot gate anything on a shared runner, so nothing here is timed
-# except the report at the bottom, which cannot fail. What gates is machine code,
-# struct sizes and exact operation counts -- all of them integers.
+# Nothing here is timed. What gates is machine code, struct sizes and exact
+# operation counts, all of them integers. Every gate compares this revision
+# against a base revision built in the same job with the same compiler, so
+# upgrading a runner image moves both sides at once.
 #
-# Every gate compares this revision against the pull request's base revision,
-# built in the same job with the same compiler. Nothing is compared against a
-# number recorded on someone else's machine, so upgrading a runner image cannot
-# turn a pull request red on its own.
+# On a pull request the base is the merge base. On a push it is the event's
+# predecessor, and the commit has already landed, so a push-triggered run
+# reports rather than gates. Where there is no predecessor the gate says so and
+# does not report a measurement it did not take.
 name: lookup-guard
 
 on:
   pull_request:
+  push:
+    branches: [master]
   workflow_dispatch:
     inputs:
       base:
@@ -29,13 +32,22 @@ concurrency:
 env:
   # The scripts read these; the workflow's only job is to fill them in from the
   # event payload. Keep the logic in tests/ci, not here.
-  FPH_CI_BASE_REF: ${{ github.event.pull_request.base.sha || inputs.base || 'master' }}
-  FPH_CI_PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ' ') }}
+  #
+  # The base differs per event and there is no default: a base that falls
+  # through to the current revision makes every gate compare the revision
+  # against itself and pass.
+  FPH_CI_BASE_REF: >-
+    ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha
+     || github.event_name == 'push' && github.event.before
+     || inputs.base }}
+  # The JSON array, so a label is matched whole rather than as a substring of a
+  # longer one.
+  FPH_CI_PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
 
 jobs:
-  # Does the lookup path's machine code change? Identical passes, shorter passes
-  # and says so, anything else fails and prints the instruction-level diff.
-  # Overridable with the allow-lookup-asm-change label.
+  # Does the lookup path's machine code change? Identical passes; anything else
+  # fails, in either direction. Overridable with the allow-lookup-asm-change
+  # label.
   lookup-asm:
     name: lookup asm ${{ matrix.os }} ${{ matrix.cxx }}
     runs-on: ${{ matrix.os }}
@@ -54,6 +66,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
       - run: tests/ci/check-asm.sh --cxx ${{ matrix.cxx }}
 
   # Exact sizes of every container, against the recorded baseline. Both growing
@@ -68,11 +81,13 @@ jobs:
         os: [ubuntu-24.04, macos-15]
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - run: tests/ci/check-sizeof.sh
 
   # Allocations, bytes, peak footprint, key copies/moves and the table geometry
   # for fixed workloads, as upper bounds. An improvement passes with no baseline
-  # edit. Overridable with the allow-cost-increase label.
+  # edit. Overridable with the allow-construction-cost-increase label.
   construction-cost:
     name: counters ${{ matrix.os }} ${{ matrix.cxx }}
     runs-on: ${{ matrix.os }}
@@ -89,13 +104,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
       - run: tests/ci/check-counters.sh --cxx ${{ matrix.cxx }}
 
   # Instructions executed and simulated D1 misses for the lookup loop itself.
   # Catches what the asm gate structurally cannot: a runtime parameter or a
   # different chosen geometry, which leave the machine code byte-identical.
   # Linux only -- valgrind has no macOS arm64 port.
-  # Overridable with the allow-cost-increase label.
+  # Overridable with the allow-lookup-cost-increase label.
   lookup-cost:
     name: callgrind ubuntu-24.04 ${{ matrix.cxx }}
     runs-on: ubuntu-24.04
@@ -108,44 +124,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
       - run: sudo apt-get update && sudo apt-get install -y valgrind
       - run: tests/ci/check-callgrind.sh --cxx ${{ matrix.cxx }}
-
-  # Timings. Cannot fail; publishes a table with the machine's own noise floor
-  # and the threshold that implies printed next to every figure, so a reader can
-  # check a claim rather than take one.
-  #
-  # The report is posted to the pull request itself. A job summary renders only
-  # on the workflow run page, which is two clicks away from the conversation,
-  # and a report nobody reads is worse than none: it teaches people to ignore
-  # the one run that matters.
-  timing-report:
-    name: timing report (informational)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 40
-    permissions:
-      contents: read
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - run: tests/ci/perf-report.sh --markdown timing-report.md
-      # One comment per pull request, rewritten on each push rather than added
-      # to. continue-on-error because a pull request from a fork gets a
-      # read-only token whatever this file asks for; the summary and the
-      # artifact below are still there in that case.
-      - if: always() && github.event_name == 'pull_request'
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: >
-          gh pr comment ${{ github.event.pull_request.number }}
-          --edit-last --create-if-none --body-file timing-report.md
-      - run: cat timing-report.md >> "$GITHUB_STEP_SUMMARY"
-        if: always()
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: timing-report
-          path: timing-report.md

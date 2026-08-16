@@ -37,48 +37,88 @@ fph_platform_tag() {
     printf '%s-%s\n' "$os" "$arch"
 }
 
-# fph_toolchain_tag <compiler> -- names the baseline file that applies here.
+# fph_toolchain_tag <compiler> -- names the toolchain a measurement came from.
 # Measured: gcc 13 and clang 18 on the same Linux box agree exactly (same
 # libstdc++), while macOS/libc++ disagrees with both, and gcc 13 disagrees with
-# gcc 15. So the tag has to name the compiler and its major version, not just
-# the platform.
+# gcc 15. So the tag has to name the compiler and its major version.
+#
+# Read from the compiler's own predefined macros rather than from the --version
+# banner. Ubuntu's `c++` prints "c++ (Ubuntu 13.3.0-...) 13.3.0", which names
+# neither gcc nor GCC, and `c++` is what CONTRIBUTING.md tells contributors to
+# run. Fails rather than guessing.
 fph_toolchain_tag() {
     cxx=$1
-    banner=$("$cxx" --version 2>/dev/null | head -1)
-    case "$banner" in
-        *"Apple clang"*) family=appleclang ;;
-        *clang*)         family=clang ;;
-        *"Free Software Foundation"*|*g++*|*GCC*|*gcc*) family=gcc ;;
-        *)               family=$(basename "$cxx" | tr -cd 'A-Za-z0-9') ;;
-    esac
-    version=$(printf '%s' "$banner" | tr ' ' '\n' |
-              grep -m1 -E '^[0-9]+\.[0-9]+' | cut -d. -f1)
-    [ -n "$version" ] || version=unknown
+    macros=$(printf '' | "$cxx" -x c++ -E -dM - 2>/dev/null) || macros=""
+    family=""
+    version=""
+    if printf '%s\n' "$macros" | grep -q '^#define __apple_build_version__'; then
+        family=appleclang
+        version=$(printf '%s\n' "$macros" | awk '$2 == "__clang_major__" { print $3 }')
+    elif printf '%s\n' "$macros" | grep -q '^#define __clang__'; then
+        family=clang
+        version=$(printf '%s\n' "$macros" | awk '$2 == "__clang_major__" { print $3 }')
+    elif printf '%s\n' "$macros" | grep -q '^#define __GNUC__'; then
+        family=gcc
+        version=$(printf '%s\n' "$macros" | awk '$2 == "__GNUC__" { print $3 }')
+    fi
+    if [ -z "$family" ] || [ -z "$version" ]; then
+        fph_error "cannot identify the compiler $cxx from its predefined macros"
+        return 1
+    fi
     printf '%s-%s%s\n' "$(fph_platform_tag)" "$family" "$version"
+}
+
+# fph_compiler_identity <compiler> -- which compiler this name actually is.
+#
+# The name is not the identity, and neither is the --version banner: on macOS
+# `c++`, `g++` and `clang++` are three hardlinks to one Apple clang, and on
+# Ubuntu `c++`, `g++` and `g++-13` all reach one gcc through /etc/alternatives
+# while each printing its own name in the banner. A matrix that dedupes by
+# either reports cells it never ran.
+#
+# The inode of the binary after following symlinks is the same for every name
+# that reaches the same file, and different for genuinely different compilers.
+fph_compiler_identity() {
+    cxx=$1
+    resolved=$(command -v "$cxx" 2>/dev/null) || { printf '%s\n' "$cxx"; return 0; }
+    inode=$(ls -iL "$resolved" 2>/dev/null | awk '{ print $1; exit }')
+    if [ -n "$inode" ]; then
+        printf 'inode:%s\n' "$inode"
+    else
+        printf 'path:%s\n' "$resolved"
+    fi
 }
 
 # fph_mktempdir -- portable mktemp -d, removed by the caller's trap.
 fph_mktempdir() { mktemp -d "${TMPDIR:-/tmp}/fphci.XXXXXX"; }
 
-# fph_git_worktree_at <ref> <dir> -- materialise <ref> at <dir>.
-# Used to build the merge base in the same job, with the same compiler, as the
-# head revision. Falls back to `git archive` when a worktree cannot be added
-# (for example when the ref is already checked out somewhere).
-fph_git_worktree_at() {
-    ref=$1; dir=$2
-    if git -C "$FPH_ROOT" worktree add --detach "$dir" "$ref" >/dev/null 2>&1; then
-        printf 'worktree\n'
+# fph_gate_waived <label> -- has this gate been signed off for this run?
+#
+# Two channels, both of which need write access to the repository:
+#   * the pull request label, visible in the pull request header
+#   * --allow-change on a local run, which sets FPH_CI_ALLOW_CHANGE
+#
+# FPH_CI_PR_LABELS is the JSON array the workflow takes from the event payload,
+# so the match is on a whole label and not on a substring of a longer name.
+fph_gate_waived() {
+    label=$1
+    if [ "${FPH_CI_ALLOW_CHANGE:-0}" = "1" ]; then
+        printf -- '--allow-change\n'
         return 0
     fi
-    mkdir -p "$dir"
-    if git -C "$FPH_ROOT" archive "$ref" | tar -x -C "$dir"; then
-        printf 'archive\n'
-        return 0
-    fi
+    case "${FPH_CI_PR_LABELS:-}" in
+        *"\"$label\""*) printf 'the %s label\n' "$label"; return 0 ;;
+    esac
     return 1
 }
 
-fph_git_worktree_release() {
-    dir=$1
-    git -C "$FPH_ROOT" worktree remove --force "$dir" >/dev/null 2>&1 || rm -rf "$dir"
+# fph_announce <level> <title> <message> -- say something that survives a green
+# check. GitHub renders ::warning:: on the run and the step summary on the
+# pull request's checks tab, so neither needs the log opening.
+fph_announce() {
+    level=$1; title=$2; message=$3
+    printf '::%s title=%s::%s\n' "$level" "$title" "$message"
+    if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+        printf -- '- **%s** — %s\n' "$title" "$message" >> "$GITHUB_STEP_SUMMARY"
+    fi
 }

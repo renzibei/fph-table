@@ -1,78 +1,94 @@
 # Shared "build this revision and the one it is based on, side by side" logic.
-# Sourced by check-asm.sh and check-counters.sh, never executed on its own.
-#
-# The whole point of comparing against the merge base built in the same job,
-# rather than against a number committed to the repository, is that a compiler
-# upgrade moves both sides at once and therefore cannot fail a pull request that
-# did not change anything. A checked-in number cannot tell the two apart.
+# Sourced by the gate scripts, never executed on its own.
 
 # fph_resolve_base_ref [explicit] -- decide which revision to compare against.
 #
 # Order of preference:
 #   1. the argument, if given
-#   2. $FPH_CI_BASE_REF          -- what the workflow sets from the PR payload
+#   2. $FPH_CI_BASE_REF          -- what the workflow sets from the event payload
 #   3. merge-base with origin/master, then master
 #   4. HEAD~1                    -- so a local `git commit; check` loop works
+#
+# Prints the resolved sha and returns 0. Returns 3 for "no base was named",
+# which the caller announces and finishes without a measurement. Returns 1 when
+# a base WAS named and cannot be found: that is a broken configuration, not an
+# absent predecessor, and it fails.
+#
+# A base that resolves to HEAD is reported as 3, not as a comparison. Building
+# the same revision twice produces an identical result whatever the revision
+# contains, so it measures nothing. The one exception is a dirty working tree:
+# there the head side is the files on disk and the base side is HEAD, which is a
+# real comparison, and that is the local edit-and-check loop.
 fph_resolve_base_ref() {
     explicit=${1:-}
-    if [ -n "$explicit" ]; then printf '%s\n' "$explicit"; return 0; fi
-    if [ -n "${FPH_CI_BASE_REF:-}" ]; then printf '%s\n' "$FPH_CI_BASE_REF"; return 0; fi
-    for candidate in origin/master master origin/main main; do
-        if git -C "$FPH_ROOT" rev-parse --verify --quiet "$candidate" >/dev/null 2>&1; then
-            if base=$(git -C "$FPH_ROOT" merge-base HEAD "$candidate" 2>/dev/null); then
-                # Comparing HEAD against itself is a no-op, not an error: it just
-                # means the branch has not diverged yet.
-                printf '%s\n' "$base"
-                return 0
+    candidate=""
+
+    if [ -n "$explicit" ]; then
+        candidate=$explicit
+    elif [ -n "${FPH_CI_BASE_REF:-}" ]; then
+        candidate=$FPH_CI_BASE_REF
+    else
+        for probe in origin/master master origin/main main; do
+            if git -C "$FPH_ROOT" rev-parse --verify --quiet "$probe" >/dev/null 2>&1; then
+                if candidate=$(git -C "$FPH_ROOT" merge-base HEAD "$probe" 2>/dev/null); then
+                    break
+                fi
+                candidate=""
             fi
+        done
+        if [ -z "$candidate" ] &&
+                git -C "$FPH_ROOT" rev-parse --verify --quiet HEAD~1 >/dev/null 2>&1; then
+            candidate=HEAD~1
         fi
-    done
-    if git -C "$FPH_ROOT" rev-parse --verify --quiet HEAD~1 >/dev/null 2>&1; then
-        printf '%s\n' "$(git -C "$FPH_ROOT" rev-parse HEAD~1)"
-        return 0
     fi
-    return 1
+
+    # A push that creates a branch reports an all-zero "before" sha; nothing at
+    # all is what a repository with a single commit resolves to.
+    case "$candidate" in
+        ''|0000000000000000000000000000000000000000) return 3 ;;
+    esac
+
+    if ! sha=$(git -C "$FPH_ROOT" rev-parse --verify --quiet "$candidate^{commit}" 2>/dev/null); then
+        fph_error "the base revision $candidate is not in this checkout"
+        fph_error "a named base that cannot be found is a broken configuration, not an absent one"
+        return 1
+    fi
+
+    if [ "$sha" = "$(git -C "$FPH_ROOT" rev-parse HEAD 2>/dev/null)" ] &&
+            git -C "$FPH_ROOT" diff --quiet HEAD -- include 2>/dev/null; then
+        return 3
+    fi
+
+    printf '%s\n' "$sha"
+    return 0
+}
+
+# fph_no_base <gate> -- there is nothing to compare against.
+#
+# This is the one sanctioned way for a gate to finish without a measurement, and
+# it happens on exactly one path: a push whose predecessor does not exist or is
+# this same revision. Push-triggered runs report a commit that has already
+# landed, so they cannot hold anything back anyway. It is announced rather than
+# passed over quietly.
+fph_no_base() {
+    fph_announce warning "$1 did not run" \
+        "no revision to compare against, so nothing was measured. This is expected only on the first push of a branch."
 }
 
 # fph_materialise_base <ref> <dir> -- put <ref>'s include/ tree at <dir>.
 # Only include/ is used: the probes and the scripts always come from the head
 # revision, so that a base revision predating tests/ci can still be measured.
+#
+# bsdtar exits 0 on empty input, so on macOS a ref that produces nothing leaves
+# an empty directory behind and reports success; the tree is checked, not the
+# pipeline's status.
 fph_materialise_base() {
     ref=$1; dir=$2
     mkdir -p "$dir"
-    if git -C "$FPH_ROOT" archive "$ref" include | tar -x -C "$dir" 2>/dev/null; then
-        return 0
+    git -C "$FPH_ROOT" archive "$ref" include 2>/dev/null | tar -x -C "$dir" 2>/dev/null || :
+    if [ ! -d "$dir/include" ] || [ -z "$(ls -A "$dir/include" 2>/dev/null)" ]; then
+        fph_error "extracting include/ from $ref produced nothing"
+        return 1
     fi
-    fph_error "cannot extract include/ from $ref"
-    return 1
-}
-
-# fph_change_allowed <commit-marker> <pr-label> -- is an intentional change
-# signed off?
-#
-# Three ways to say yes, all of them visible in the pull request:
-#   * the workflow passes --allow-change (which it sets from a PR label)
-#   * FPH_CI_PR_LABELS contains the label
-#   * any commit message on the branch contains the marker
-#
-# A gate nobody can override gets disabled instead of used, so the override is
-# part of the design rather than a hole in it.
-fph_change_allowed() {
-    marker=$1
-    label=$2
-    if [ "${FPH_CI_ALLOW_CHANGE:-0}" = "1" ]; then
-        printf 'flag\n'; return 0
-    fi
-    case " ${FPH_CI_PR_LABELS:-} " in
-        *" $label "*) printf 'label\n'; return 0 ;;
-    esac
-    if [ -n "${FPH_CI_BASE_REF:-}" ]; then
-        range="$FPH_CI_BASE_REF..HEAD"
-    else
-        range="-1"
-    fi
-    if git -C "$FPH_ROOT" log $range --format=%B 2>/dev/null | grep -qF "$marker"; then
-        printf 'commit-message\n'; return 0
-    fi
-    return 1
+    return 0
 }
